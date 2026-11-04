@@ -1,0 +1,21 @@
+// Optional per-invocation public dependency mirrors. No global settings changes.
+def redirectRepository = { repository ->
+    if (repository instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository) {
+        def host = repository.url.host
+        if (host == 'repo.maven.apache.org' || host == 'repo1.maven.org') {
+            repository.setUrl(java.net.URI.create('https://maven.aliyun.com/repository/central'))
+        } else if (host == 'dl.google.com' || host == 'maven.google.com') {
+            repository.setUrl(java.net.URI.create('https://maven.aliyun.com/repository/google'))
+        } else if (host == 'plugins.gradle.org') {
+            repository.setUrl(java.net.URI.create('https://maven.aliyun.com/repository/gradle-plugin'))
+        }
+    }
+}
+gradle.beforeSettings { settings ->
+    settings.pluginManagement.repositories.all(redirectRepository)
+    settings.dependencyResolutionManagement.repositories.all(redirectRepository)
+}
+gradle.beforeProject { project ->
+    project.repositories.all(redirectRepository)
+    project.buildscript.repositories.all(redirectRepository)
+}
