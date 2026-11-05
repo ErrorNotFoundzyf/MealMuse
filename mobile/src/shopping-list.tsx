@@ -5,9 +5,9 @@ import { colors, Notice, s } from './ui';
 import { l } from './library-ui';
 import type { ShoppingItem } from './types';
 
-export function ShoppingList({ recipeIds, recordId, revision }: { recipeIds: string[]; recordId?: string; revision?: number }) {
+export function ShoppingList({ recipeIds, recordId, revision, planId, planRevision }: { recipeIds: string[]; recordId?: string; revision?: number; planId?: string; planRevision?: number }) {
   const api = useApi(); const [items, setItems] = useState<ShoppingItem[]>([]); const [error, setError] = useState(''); const [loading, setLoading] = useState(false); const [retry, setRetry] = useState(0);
-  const body = JSON.stringify({ recipe_ids: recipeIds, ...(recordId ? { record_id: recordId, revision } : {}) });
+  const body = JSON.stringify({ recipe_ids: recipeIds, ...(recordId ? { record_id: recordId, revision } : planId ? { plan_id: planId, plan_revision: planRevision } : {}) });
   useEffect(() => {
     if (!api.ready || !JSON.parse(body).recipe_ids.length) { setItems([]); return; }
     let current = true; setLoading(true); setError('');

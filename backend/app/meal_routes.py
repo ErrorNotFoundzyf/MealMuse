@@ -3,7 +3,7 @@ import hashlib
 import json
 
 from fastapi import Depends, Query, Response
-from pydantic import Field, StrictInt, field_validator, model_validator
+from pydantic import Field, StrictBool, StrictInt, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,8 @@ class MealInput(Input):
     revision: StrictInt | None = Field(default=None, ge=1)
     plan_id: str | None = None
     plan_revision: StrictInt | None = Field(default=None, ge=1)
+    acknowledge_unknown: StrictBool = False
+    manual_adjustment: StrictBool = False
 
     @model_validator(mode="after")
     def complete_plan(self):
@@ -104,9 +106,9 @@ def register_meal_routes(api, db):
         plan = None
         if data.plan_id:
             from .recommendations import validate_plan_confirmation
-            plan = validate_plan_confirmation(session, data.plan_id, data.plan_revision, data.recipe_ids, data.people_count, data.meal_date.isoformat())
+            plan = validate_plan_confirmation(session, data.plan_id, data.plan_revision, data.recipe_ids, data.people_count, data.meal_date.isoformat(), data.acknowledge_unknown, data.manual_adjustment)
         item = MealRecord(meal_date=data.meal_date.isoformat(), people_count=data.people_count,
-                          dishes=snapshots(session, data.recipe_ids), creation_key=data.request_key,
+                          dishes=snapshots(session, data.recipe_ids, plan.dishes) if plan else snapshots(session, data.recipe_ids), creation_key=data.request_key,
                           last_request_key=data.request_key, payload_hash=digest, revision=1)
         session.add(item)
         session.flush()

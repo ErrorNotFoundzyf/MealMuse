@@ -5,7 +5,7 @@ import type { MealDish, MealRecord, PlanningSettings, Profile, RulePlan } from '
 
 export const chinaToday = () => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
 export const requestKey = () => `menu-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-type Draft = { recipeIds: string[]; people: number; mealDate: string; requestKey: string; recordId?: string; revision?: number; dishes: MealDish[]; rulePlan?: RulePlan; planning?: PlanningSettings };
+type Draft = { recipeIds: string[]; people: number; mealDate: string; requestKey: string; recordId?: string; revision?: number; dishes: MealDish[]; rulePlan?: RulePlan; planning?: PlanningSettings; manualAdjustment?: boolean };
 const empty = (people = 4, mealDate = chinaToday()): Draft => ({ recipeIds: [], people, mealDate, requestKey: requestKey(), dishes: [] });
 type MenuContextValue = { draft: Draft; ready: boolean; error: string; setDraft: React.Dispatch<React.SetStateAction<Draft>>; start: (date?: string, record?: MealRecord) => void; resetIfKey: (key: string) => void };
 const MenuContext = createContext<MenuContextValue | null>(null);

@@ -25,3 +25,4 @@ mobile/ios/
 *.jks
 *.keystore
 *.apk
+backend/llm.local.json

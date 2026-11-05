@@ -21,6 +21,7 @@ from .seed import seed
 from .errors import DomainError
 from .meal_routes import register_meal_routes
 from .recommendations import register_recommendation_routes
+from .ai_planning import register_ai_routes
 
 
 def migrate(engine):
@@ -44,7 +45,7 @@ def create_app(database_url: str | None = None, api_token: str | None = None):
         yield
         engine.dispose()
 
-    app = FastAPI(title="吃饭灵感 · 家庭数据 API", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="吃饭灵感 · 家庭数据 API", version="0.4.0", lifespan=lifespan)
     app.state.engine = engine
 
     @app.middleware("http")
@@ -91,7 +92,7 @@ def create_app(database_url: str | None = None, api_token: str | None = None):
 
     @app.get("/api/v1/health")
     def health():
-        return {"status": "ok", "stage": "M2B", "version": "0.3.0"}
+        return {"status": "ok", "stage": "M3", "version": "0.4.0"}
 
     @api.get("/time-context")
     def current_time():
@@ -258,6 +259,7 @@ def create_app(database_url: str | None = None, api_token: str | None = None):
 
     register_meal_routes(api, db)
     register_recommendation_routes(api, db)
+    register_ai_routes(api, sessions, app)
     app.include_router(api)
     return app
 

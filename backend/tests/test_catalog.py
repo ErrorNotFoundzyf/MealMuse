@@ -166,7 +166,7 @@ def test_detail_and_migration_schema(client):
     assert detail.status_code == 200 and detail.json()["name"] == "西红柿"
     assert client.get("/api/v1/ingredients/missing").status_code == 404
     with client.app.state.engine.connect() as conn:
-        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == "0004_rule_plans"
+        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == "0005_ai_memory"
         assert compare_metadata(MigrationContext.configure(conn), Base.metadata) == []
 
 

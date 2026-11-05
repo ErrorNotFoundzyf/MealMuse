@@ -49,6 +49,6 @@ export default function Settings() {
       {api.hasToken && !replaceToken ? <><Text style={s.caption}>已保存家庭接入凭证，不在此显示。</Text><Button label="更换或清除凭证" secondary onPress={() => setReplaceToken(true)} /></> : <Field label="家庭接入凭证（本地开发可留空）" value={token} onChange={v => { setToken(v); setReplaceToken(true); }} secret />}
       <Button label="保存连接设置" secondary busy={busy === 'connection'} disabled={!!busy} onPress={() => dirty ? Alert.alert('更换连接', '未保存的家庭配置将被重新加载。', [{ text: '取消' }, { text: '继续', onPress: saveConnection }]) : saveConnection()} />
     </View>
-    <Text style={s.caption}>吃饭灵感 · 0.3.0 / 规则搭配{ '\n' }无图片，无市场状态维护。食材季节可按家庭经验调整。</Text>
+    <Text style={s.caption}>吃饭灵感 · 0.4.0 / 对话搭配{ '\n' }无图片，无市场状态维护。食材季节可按家庭经验调整。</Text>
   </Page>;
 }

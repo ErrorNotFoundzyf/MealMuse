@@ -42,6 +42,8 @@ class ShoppingInput(Input):
     recipe_ids: list[str] = Field(min_length=1, max_length=20)
     record_id: str | None = None
     revision: StrictInt | None = None
+    plan_id: str | None = None
+    plan_revision: StrictInt | None = None
 
     @field_validator("recipe_ids")
     @classmethod
@@ -167,15 +169,36 @@ def shopping_list(session, dishes):
 def plan_data(session, plan):
     return {"id": plan.id, "revision": plan.revision, "people_count": plan.people_count, "category_counts": plan.category_counts,
             "as_of_date": plan.as_of_date, "dishes": plan.dishes, "allow_nonseasonal": plan.allow_nonseasonal,
-            "confirmed_record_id": plan.confirmed_record_id, "shopping_list": shopping_list(session, plan.dishes), "mode": "rules"}
+            "confirmed_record_id": plan.confirmed_record_id, "shopping_list": shopping_list(session, plan.dishes), "mode": "chat" if plan.ai_memory else "rules",
+            "ai": {key: plan.ai_memory.get(key) for key in ("messages", "blocked", "unknown", "pending", "constraints")} if plan.ai_memory else None}
 
 
-def validate_plan_confirmation(session, plan_id, revision, recipe_ids, people, meal_date):
+def validate_plan_confirmation(session, plan_id, revision, recipe_ids, people, meal_date, acknowledge_unknown=False, manual_adjustment=False):
     plan = session.get(RulePlan, plan_id)
     if not plan or plan.confirmed_record_id or plan.revision != revision:
         raise DomainError(409, "STALE_PLAN", "推荐菜单已更新或确认，请重新读取后再确认")
-    if meal_date != time_context()["as_of_date"] or recipe_ids != [d["recipe_id"] for d in plan.dishes]:
+    if meal_date != time_context()["as_of_date"] or (not manual_adjustment and recipe_ids != [d["recipe_id"] for d in plan.dishes]):
         raise DomainError(409, "PLAN_CHANGED", "推荐内容或日期已变化，请重新搭配；手动调整请使用自己挑")
+    if plan.ai_memory:
+        from .ai_planning import conflicts
+        if plan.ai_memory.get("blocked"):
+            raise DomainError(409, "AI_PENDING", "本轮要求尚未处理完成，请先继续对话或重试")
+        conditions = plan.ai_memory.get("constraints", [])
+        if conditions and not acknowledge_unknown:
+            raise DomainError(422, "CHECK_CONSTRAINTS", "存在明确饮食限制，确认前请核对配料与做法并勾选提示")
+        recent_ids, recent_sigs = recent_exclusions(session, time_context()["as_of_date"])
+        dishes = snapshots(session, recipe_ids, plan.dishes) if manual_adjustment else plan.dishes
+        fresh = {d["recipe_id"]: d for d in candidates(session, plan.allow_nonseasonal)}
+        for dish in dishes:
+            states = season_info(session, dish, time_context()["current_season"])
+            if conflicts(dish, conditions) or not states:
+                raise DomainError(409, "AI_CONSTRAINT_CONFLICT", "菜单中存在已知禁忌或食材变化，请调整后确认")
+            if not manual_adjustment:
+                if dish["recipe_id"] in recent_ids or signature(dish) in recent_sigs or (not plan.allow_nonseasonal and any(s["status"] != "in_season" for s in states)):
+                    raise DomainError(409, "PLAN_NO_LONGER_VALID", "近期记录或季节已变化，请重新搭配")
+                if not dish["recipe_id"].startswith("tmp_") and (dish["recipe_id"] not in fresh or any(fresh[dish["recipe_id"]].get(k) != dish.get(k) for k in ("name", "category_id", "ingredients", "steps", "notes"))):
+                    raise DomainError(409, "PLAN_NO_LONGER_VALID", "菜谱已变化，请重新搭配")
+        return plan
     available = {d["recipe_id"]: d for d in candidates(session, plan.allow_nonseasonal, plan.rejected_ids, plan.rejected_signatures)}
     for dish in plan.dishes:
         current = available.get(dish["recipe_id"])
@@ -219,6 +242,8 @@ def register_recommendation_routes(api, db):
 
     def change_plan(plan_id, data, session, regenerate=False):
         plan = get_plan(session, plan_id)
+        if plan.ai_memory:
+            raise DomainError(409, "USE_CHAT", "这份菜单包含本餐对话要求，请通过对话调整以保留条件")
         if plan.last_request_key == data.request_key:
             if plan.last_payload_hash != digest(data):
                 raise DomainError(409, "REQUEST_CHANGED", "请求内容已变化，请重新操作")
@@ -268,4 +293,9 @@ def register_recommendation_routes(api, db):
             if not record or record.deleted_at or record.revision != data.revision:
                 raise DomainError(409, "STALE_MEAL", "食记已更新，请重新打开")
             previous = record.dishes
+        elif data.plan_id:
+            plan = get_plan(session, data.plan_id)
+            if plan.revision != data.plan_revision:
+                raise DomainError(409, "STALE_PLAN", "菜单已更新，请重新打开")
+            previous = plan.dishes
         return {"items": shopping_list(session, snapshots(session, data.recipe_ids, previous))}

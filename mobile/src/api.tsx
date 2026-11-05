@@ -7,7 +7,7 @@ import type { Page } from './types';
 type Api = {
   ready: boolean; baseUrl: string; hasToken: boolean; revision: number;
   saveConnection: (url: string, token: string, replaceToken?: boolean) => Promise<void>;
-  request: <T>(path: string, options?: RequestInit) => Promise<T>;
+  request: <T>(path: string, options?: RequestInit, timeoutMs?: number) => Promise<T>;
   changed: () => void;
 };
 const ApiContext = createContext<Api | null>(null);
@@ -39,9 +39,9 @@ export function ApiProvider({ children }: React.PropsWithChildren) {
     }
     setBaseUrl(trimmed); changed();
   }, [changed]);
-  const request = useCallback(async <T,>(path: string, options: RequestInit = {}): Promise<T> => {
+  const request = useCallback(async <T,>(path: string, options: RequestInit = {}, timeoutMs = 12000): Promise<T> => {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(`${baseUrl}/api/v1${path}`, {
         ...options, signal: controller.signal,
@@ -58,7 +58,7 @@ export function ApiProvider({ children }: React.PropsWithChildren) {
       return data as T;
     } catch (error) {
       // Android may wrap an aborted fetch as a generic Error instead of AbortError.
-      if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw new Error('连接超时，请检查服务是否启动；USB 调试时请检查数据线连接');
+      if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) throw new Error(timeoutMs > 12000 ? '本轮响应较慢，请重试；菜单不会自动确认' : '连接超时，请检查服务是否启动；USB 调试时请检查数据线连接');
       if (error instanceof TypeError) throw new Error('连接不到家庭服务，请到设置检查地址、网络和服务是否启动');
       throw error;
     } finally { clearTimeout(timeout); }

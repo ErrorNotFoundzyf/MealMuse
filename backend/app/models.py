@@ -131,3 +131,4 @@ class RulePlan(Base):
     confirmed_record_id: Mapped[str | None] = mapped_column(ForeignKey("meal_records.id", ondelete="RESTRICT"), nullable=True)
     created_at: Mapped[str] = mapped_column(String, default=now)
     updated_at: Mapped[str] = mapped_column(String, default=now)
+    ai_memory: Mapped[dict | None] = mapped_column(JSON, nullable=True)
