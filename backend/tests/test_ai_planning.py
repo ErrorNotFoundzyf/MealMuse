@@ -23,8 +23,10 @@ class FakeAI:
             result = self.intent(context) if callable(self.intent) else self.intent or {'action':'generate','reply':'开始搭配'}
             return schema.model_validate(result)
         if self.select:
-            return schema.model_validate(self.select(context))
-        choices=[]; chosen=set()
+            result = self.select(context)
+            result.setdefault('eligible_ids', [r['recipe_id'] for r in context['candidate_recipes']])
+            return schema.model_validate(result)
+        choices=[]; chosen={d['recipe_id'] for d in context['keep_dishes']}
         for slot, category in enumerate(context['slots']):
             candidate=next((r for r in context['candidate_recipes'] if r['category_id']==category and r['recipe_id'] not in chosen),None)
             if candidate:
@@ -33,7 +35,7 @@ class FakeAI:
             else:
                 ingredient=context['allowed_ingredients'][0]['id']
                 choices.append({'slot':slot,'temporary':{'name':'临时家常菜'+str(slot),'category_id':category,'ingredient_ids':[ingredient]},'suitability':'unknown','reason':'补齐候选缺口'})
-        return schema.model_validate({'choices':choices,'reply':'请看看这桌菜单'})
+        return schema.model_validate({'eligible_ids':[r['recipe_id'] for r in context['candidate_recipes']], 'choices':choices,'reply':'请看看这桌菜单'})
 
 @pytest.fixture
 def env(tmp_path):
@@ -159,3 +161,117 @@ def test_manual_selection_and_config_change_preserve_hard_memory(env):
     second=chat(client,first,selected_recipe_ids=[],replace_selection=True,people_count=2,category_counts={'vegetable':1}).json()
     assert second['people_count']==2 and len(second['dishes'])==1
     assert second['ai']['constraints']==first['ai']['constraints']
+
+
+def swap(client, plan, regenerate=False, key=None):
+    return client.post('/api/v1/recommendations/'+plan['id']+('/regenerate' if regenerate else '/replace'), json={
+        'request_key': key or str(uuid4()), 'expected_revision': plan['revision'],
+        **({} if regenerate else {'recipe_id':plan['dishes'][0]['recipe_id']})})
+
+
+def forbid_model(client):
+    def forbidden():
+        raise AssertionError('Button must not create a model client')
+    client.app.state.ai_client_factory = forbidden
+
+
+def test_buttons_use_only_candidate_two_without_model_or_chat_messages(env):
+    client,fake=env
+    approved=[]
+    def select_two(context):
+        approved[:] = [d['recipe_id'] for d in context['candidate_recipes'] if d['category_id']=='meat'][:2]
+        assert len(approved)==2
+        return {'eligible_ids':approved,'choices':[{'slot':0,'candidate_id':approved[0],'suitability':'match','reason':'家常'}],'reply':'已筛选两道'}
+    fake.select=select_two
+    first=chat(client,category_counts={'meat':1}).json()
+    assert first['ai']['candidate_counts']=={'meat':2}
+    messages=deepcopy(first['ai']['messages']);calls=len(fake.calls)
+    forbid_model(client)
+    key=str(uuid4())
+    response=swap(client,first,key=key)
+    assert response.status_code==200
+    second=response.json()
+    assert second['dishes'][0]['recipe_id']==approved[1]
+    assert second['ai']['messages']==messages and len(fake.calls)==calls
+    assert second['ai']['pool_version']==first['ai']['pool_version']
+    assert swap(client,first,key=key).json()==second
+    assert swap(client,first).status_code==409
+    exhausted=swap(client,second)
+    assert exhausted.status_code==409 and exhausted.json()['error']['code']=='CANDIDATE_POOL_EXHAUSTED'
+    assert client.get('/api/v1/recommendations/'+second['id']).json()==second
+
+
+def test_whole_table_button_preserves_conditions_and_only_uses_filtered_pool(env):
+    client,fake=env
+    first=chat(client,message='不要牛肉，家常清淡',category_counts={'meat':1,'vegetable':1}).json()
+    assert not first['ai']['blocked']
+    with Session(client.app.state.engine) as session:
+        approved={d['recipe_id'] for d in session.get(RulePlan,first['id']).ai_memory['candidate_pool']}
+    forbid_model(client)
+    response=swap(client,first,regenerate=True)
+    assert response.status_code==200
+    second=response.json()
+    ids={d['recipe_id'] for d in second['dishes']}
+    assert ids <= approved and not ids.intersection(d['recipe_id'] for d in first['dishes'])
+    assert second['ai']['constraints']==first['ai']['constraints']
+    assert second['ai']['messages']==first['ai']['messages']
+
+
+def test_new_dialogue_replaces_candidate_two_and_failure_does_not_publish_partial_pool(env):
+    client,fake=env
+    first=chat(client,category_counts={'meat':1}).json()
+    def only_one(context):
+        chosen=next(d['recipe_id'] for d in reversed(context['candidate_recipes']) if d['category_id']=='meat')
+        return {'eligible_ids':[chosen],'choices':[{'slot':0,'candidate_id':chosen,'suitability':'match','reason':'符合新偏好'}],'reply':'重新筛选'}
+    fake.select=only_one
+    second=chat(client,first,'换成更清淡的',category_counts={'meat':1}).json()
+    assert second['ai']['candidate_counts']=={'meat':1}
+    assert second['ai']['pool_version']==first['ai']['pool_version']+1
+    fake.select=lambda context:{'eligible_ids':['invented'],'choices':[],'reply':'invalid'}
+    failed=chat(client,second,'再筛选',category_counts={'meat':1}).json()
+    assert failed['ai']['blocked'] and failed['ai']['pool_version']==second['ai']['pool_version']
+    assert failed['dishes']==second['dishes']
+    forbid_model(client)
+    assert swap(client,failed).json()['error']['code']=='AI_PENDING'
+
+
+@pytest.mark.parametrize('change', ['recipe_edit','recent','season','deleted'])
+def test_cached_pool_rechecks_library_season_and_recent_history(env, change):
+    client,fake=env
+    approved=[]
+    def two(context):
+        approved[:]=[d['recipe_id'] for d in context['candidate_recipes'] if d['category_id']=='meat'][:2]
+        return {'eligible_ids':approved,'choices':[{'slot':0,'candidate_id':approved[0],'suitability':'match','reason':'符合'}],'reply':'已筛选'}
+    fake.select=two
+    first=chat(client,category_counts={'meat':1},allow_nonseasonal=False).json()
+    assert not first['ai']['blocked']
+    alternative=approved[1]
+    if change=='recent':
+        response=client.post('/api/v1/meal-records',json={'request_key':str(uuid4()),'meal_date':time_context()['as_of_date'],'people_count':2,'recipe_ids':[alternative]})
+        assert response.status_code==201
+    else:
+        from app.models import Ingredient
+        with Session(client.app.state.engine) as session:
+            recipe=session.get(Recipe,alternative)
+            if change=='recipe_edit': recipe.steps='更改后的做法'
+            elif change=='deleted': recipe.is_hidden=True
+            else:
+                pool=session.get(RulePlan,first['id']).ai_memory['candidate_pool']
+                other=next(d for d in pool if d['recipe_id']==alternative)
+                current=first['dishes'][0]
+                ingredient=next(i['ingredient_id'] for i in other['ingredients'] if i['ingredient_id'] not in {x['ingredient_id'] for x in current['ingredients']})
+                session.get(Ingredient,ingredient).seasons=[]
+            session.commit()
+    forbid_model(client)
+    response=swap(client,first)
+    assert response.status_code==409
+    assert client.get('/api/v1/recommendations/'+first['id']).json()['dishes']==first['dishes']
+
+
+def test_old_ai_plan_requires_explicit_chat_to_create_pool(env):
+    client,fake=env
+    first=chat(client,category_counts={'meat':1}).json()
+    with Session(client.app.state.engine) as session:
+        plan=session.get(RulePlan,first['id']);memory=deepcopy(plan.ai_memory);memory.pop('candidate_pool');plan.ai_memory=memory;session.commit()
+    forbid_model(client)
+    assert swap(client,first).json()['error']['code']=='POOL_REFRESH_REQUIRED'

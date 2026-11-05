@@ -37,6 +37,7 @@ class JsonClient:
             raise DomainError(503, "AI_NOT_CONFIGURED", "请先在后端本地配置 DeepSeek 密钥")
         self.deadline = monotonic() + 42
         self.calls = 0
+        self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0, "requests": 0}
 
     def ask(self, schema, instruction, context, max_tokens=3000):
         messages = [{"role": "system", "content": instruction + "\n只输出 JSON，严格遵循此 schema：" + json.dumps(schema.model_json_schema(), ensure_ascii=False)},
@@ -56,6 +57,11 @@ class JsonClient:
                 if len(raw) > 2_000_000:
                     raise ValueError()
                 result = json.loads(raw)
+                self.usage["requests"] += 1
+                for key in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens"):
+                    value = result.get("usage", {}).get(key, 0)
+                    if type(value) is int and value >= 0:
+                        self.usage[key] += value
                 choice = result["choices"][0]
                 content = choice["message"]["content"]
                 if choice.get("finish_reason") != "stop" or not isinstance(content, str) or not content.strip():

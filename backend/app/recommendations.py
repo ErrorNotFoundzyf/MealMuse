@@ -170,7 +170,9 @@ def plan_data(session, plan):
     return {"id": plan.id, "revision": plan.revision, "people_count": plan.people_count, "category_counts": plan.category_counts,
             "as_of_date": plan.as_of_date, "dishes": plan.dishes, "allow_nonseasonal": plan.allow_nonseasonal,
             "confirmed_record_id": plan.confirmed_record_id, "shopping_list": shopping_list(session, plan.dishes), "mode": "chat" if plan.ai_memory else "rules",
-            "ai": {key: plan.ai_memory.get(key) for key in ("messages", "blocked", "unknown", "pending", "constraints")} if plan.ai_memory else None}
+            "ai": {**{key: plan.ai_memory.get(key) for key in ("messages", "blocked", "unknown", "pending", "constraints", "pool_version", "last_action", "last_usage")},
+                   "has_candidate_pool": "candidate_pool" in plan.ai_memory,
+                   "candidate_counts": dict(Counter(d["category_id"] for d in plan.ai_memory.get("candidate_pool", [])))} if plan.ai_memory else None}
 
 
 def validate_plan_confirmation(session, plan_id, revision, recipe_ids, people, meal_date, acknowledge_unknown=False, manual_adjustment=False):
@@ -243,7 +245,8 @@ def register_recommendation_routes(api, db):
     def change_plan(plan_id, data, session, regenerate=False):
         plan = get_plan(session, plan_id)
         if plan.ai_memory:
-            raise DomainError(409, "USE_CHAT", "这份菜单包含本餐对话要求，请通过对话调整以保留条件")
+            from .ai_planning import change_cached_plan
+            return change_cached_plan(session, plan, data, regenerate)
         if plan.last_request_key == data.request_key:
             if plan.last_payload_hash != digest(data):
                 raise DomainError(409, "REQUEST_CHANGED", "请求内容已变化，请重新操作")

@@ -5,7 +5,6 @@ import json
 import re
 from uuid import uuid4
 
-from fastapi import Depends
 from pydantic import Field, StrictBool, StrictInt, model_validator
 from sqlalchemy import select, text
 
@@ -13,7 +12,7 @@ from .errors import DomainError
 from .llm import JsonClient, status
 from .meal_routes import snapshots
 from .models import Ingredient, IngredientName, Profile, Recipe, RecipeIngredient, RulePlan, now
-from .recommendations import CATEGORIES, GenerateInput, candidates, digest, plan_data, recent_exclusions, season_info, signature
+from .recommendations import CATEGORIES, GenerateInput, candidates, digest, mains, plan_data, recent_exclusions, season_info, select_menu, signature
 from .schemas import Input, normalize
 from .season import time_context
 
@@ -70,6 +69,7 @@ class Choice(Input):
 
 
 class Selection(Input):
+    eligible_ids: list[str] = Field(max_length=80)
     choices: list[Choice] = Field(max_length=20)
     reply: str = Field(min_length=1, max_length=400)
 
@@ -79,7 +79,9 @@ INTENT_PROMPT = """你是吃饭灵感的需求理解器，不直接写库。所�
 “换第一道和汤，另外两道保留”必须只操作目标；“不要牛肉”是本餐硬禁忌，“清淡、快手”是偏好。constraints只能新增，有原文evidence，ingredient引用已给ID，不识别的硬禁忌clarify。不能默默取消旧禁忌。category_counts只在明确改变荤素汤数量时填写（总数1至20），不能把米饭算一道菜。
 闲聊/询问用chat并简短说明；不得作治疗或确定无过敏原的保证。不主动修改家庭默认配置。"""
 SELECT_PROMPT = """你是家庭菜单搭配助手，只输出JSON。按slots逐个挑选，并考虑整桌主料多样性、用户偏好及明确禁忌。
+先按本餐全部条件过滤candidate_recipes，eligible_ids列出所有可用于本餐的候选ID（包括适用的保留菜），不要只列最终选中的菜；不合适的不要列，信息不足的限制不能保证满足。用户后续按钮只从这批备选换菜，不再调用你。
 candidate_id只能是提供的候选ID。keep_dishes完全冻结，不得改名、主料、做法。每个slot恰好一个choice，不可重选同一道菜。
+choices只可从eligible_ids里选择，且不得重复选择keep_dishes。保留菜不满足新条件时，从eligible_ids排除它，程序会要求用户澄清。
 候选语义上不能满足时，可以使用temporary提出一份临时菜，仅写名称、分类、主要食材ID，不补步骤或克数；只能引用allowed_ingredients。它不是正式菜谱。
 已提供的日期、季节、排除项由规则决定，不可覆盖。遇到硬禁忌，已知冲突不能选；配料、调味、做法不完整时suitability必须unknown，不能因为主要食材没列辣椒就保证无辣或无过敏原。
 不把缺失食材称为家里已有，不声称市场有货，不提供医疗或营养功效保证。理由只解释搭配依据，不虚构已知做法。"""
@@ -170,11 +172,89 @@ def season_status_for(ingredient):
     return season_status(ingredient["seasons"], time_context()["current_season"])
 
 
+def model_dish(dish):
+    """Send decision facts, not quantities or duplicated UI metadata."""
+    return {"recipe_id": dish["recipe_id"], "name": dish["name"], "category_id": dish["category_id"],
+            "ingredients": [{"id": i["ingredient_id"], "name": i["name"], "main": i["is_main"]} for i in dish["ingredients"]],
+            "steps": dish.get("steps"), "notes": dish.get("notes"), "minutes": dish.get("cook_time_minutes")}
+
+
+def pool_context(people, counts, allow, memory):
+    return {"people": people, "counts": counts, "allow": allow, "constraints": memory.get("constraints", []), "preferences": memory.get("preferences", [])}
+
+
+def valid_cached_dish(session, dish, fresh, conditions, allow, recent_ids, recent_sigs):
+    if dish["recipe_id"] in recent_ids or signature(dish) in recent_sigs or conflicts(dish, conditions):
+        return False
+    states = season_info(session, dish, time_context()["current_season"])
+    if not states or (not allow and any(s["status"] != "in_season" for s in states)):
+        return False
+    if not dish["recipe_id"].startswith("tmp_"):
+        current = fresh.get(dish["recipe_id"])
+        if not current or any(current.get(k) != dish.get(k) for k in ("name", "category_id", "ingredients", "steps", "notes", "cook_time_minutes", "is_hearty")):
+            return False
+    return True
+
+
+def change_cached_plan(session, plan, data, regenerate):
+    """Button actions select only from the last model-filtered pool. No model client."""
+    if plan.last_request_key == data.request_key:
+        if plan.last_payload_hash != digest(data):
+            raise DomainError(409, "REQUEST_CHANGED", "这次请求内容已变化，请重新操作")
+        return plan_data(session, plan)
+    if plan.confirmed_record_id or plan.revision != data.expected_revision:
+        raise DomainError(409, "STALE_PLAN", "菜单已更新，请重新读取")
+    memory = deepcopy(plan.ai_memory)
+    if memory.get("blocked") or memory.get("pending"):
+        raise DomainError(409, "AI_PENDING", "本轮要求尚未完成，请继续对话后再换菜")
+    if "candidate_pool" not in memory or memory.get("pool_context") != pool_context(plan.people_count, plan.category_counts, plan.allow_nonseasonal, memory):
+        raise DomainError(409, "POOL_REFRESH_REQUIRED", "请先发送一次本餐要求，生成符合要求的备选菜")
+    recent_ids, recent_sigs = recent_exclusions(session, time_context()["as_of_date"])
+    fresh = {d["recipe_id"]: d for d in candidates(session, plan.allow_nonseasonal)}
+    valid = lambda d: valid_cached_dish(session, d, fresh, memory.get("constraints", []), plan.allow_nonseasonal, recent_ids, recent_sigs)
+    target = next((d for d in plan.dishes if d["recipe_id"] == data.recipe_id), None)
+    if not regenerate and target is None:
+        raise DomainError(422, "INVALID_TARGET", "请选择当前菜单中的一道菜")
+    kept = [] if regenerate else [d for d in plan.dishes if d["recipe_id"] != target["recipe_id"]]
+    if any(not valid(d) for d in kept):
+        raise DomainError(409, "KEPT_DISH_CHANGED", "保留菜的菜谱、季节或近期记录已变化，请重新发送搭配要求")
+    old = plan.dishes if regenerate else [target]
+    blocked_ids = set(plan.rejected_ids) | {d["recipe_id"] for d in plan.dishes}
+    blocked_sigs = set(plan.rejected_signatures) | {signature(d) for d in plan.dishes}
+    pool = [deepcopy(d) for d in memory["candidate_pool"] if d["recipe_id"] not in blocked_ids and signature(d) not in blocked_sigs and valid(d)]
+    try:
+        if regenerate:
+            new = select_menu(pool, plan.category_counts, allow_nonseasonal=plan.allow_nonseasonal)
+        else:
+            options = [d for d in pool if d["category_id"] == target["category_id"]]
+            if not options:
+                raise DomainError(409, "EMPTY_POOL", "备选不足")
+            overlap = Counter(i for d in kept for i in mains(d))
+            from random import SystemRandom
+            rng = SystemRandom()
+            replacement = max(options, key=lambda d: d["season_coverage"] * 10 - sum(overlap[i] for i in mains(d)) * 0.7 + rng.random() * 0.4)
+            new = [replacement if d["recipe_id"] == target["recipe_id"] else d for d in plan.dishes]
+    except DomainError:
+        raise DomainError(409, "CANDIDATE_POOL_EXHAUSTED", "本轮合适的备选已不足，当前菜单已保留。可以自己挑，或发送新要求让 AI 重新筛选；本次未调用 AI。") from None
+    plan.dishes = new
+    plan.rejected_ids = list(set(plan.rejected_ids) | {d["recipe_id"] for d in old})
+    plan.rejected_signatures = list(set(plan.rejected_signatures) | {signature(d) for d in old})
+    memory["rejected_ids"], memory["rejected_signatures"] = plan.rejected_ids, plan.rejected_signatures
+    memory["last_action"] = "rule_regenerate" if regenerate else "rule_replace"
+    plan.ai_memory = memory
+    plan.revision += 1
+    plan.as_of_date, plan.updated_at = time_context()["as_of_date"], now()
+    plan.last_request_key, plan.last_payload_hash = data.request_key, digest(data)
+    session.commit()
+    return plan_data(session, plan)
+
+
 def run_turn(client, session_factory, plan_id, original_dishes, memory, pending, people, counts, allow, rejected_ids, rejected_sigs):
     with session_factory() as session:
         catalog = get_catalog(session)
-    intent = client.ask(Intent, INTENT_PROMPT, {"current_dishes": original_dishes, "people_count": people, "category_counts": counts,
-        "conditions": memory.get("constraints", []), "preferences": memory.get("preferences", []), "messages": memory.get("messages", [])[-6:], "pending_user_messages": pending, "ingredients": catalog}, max_tokens=1800)
+    intent = client.ask(Intent, INTENT_PROMPT, {"current_dishes": [{"recipe_id": d["recipe_id"], "name": d["name"], "category_id": d["category_id"]} for d in original_dishes], "people_count": people, "category_counts": counts,
+        "conditions": memory.get("constraints", []), "preferences": memory.get("preferences", []), "messages": memory.get("messages", [])[-6:], "pending_user_messages": pending,
+        "ingredients": [{"id": i["id"], "name": i["name"], "aliases": i["aliases"]} for i in catalog]}, max_tokens=1800)
     memory["constraints"] = merge_constraints(memory, intent, pending, catalog)
     memory["preferences"] = list(dict.fromkeys([*memory.get("preferences", []), *[p[:200] for p in intent.preferences]]))[-20:]
     people = intent.people_count or people
@@ -187,7 +267,8 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
     if (any(word in " ".join(pending) for word in ["过敏", "不能吃", "不吃"]) and not memory["constraints"]) or intent.action == "clarify":
         return original_dishes, clean_reply(intent.reply), True, people, counts
     if intent.action == "chat":
-        return original_dishes, clean_reply(intent.reply), bool(memory.get("blocked")) or bool(intent.constraints) or not original_dishes, people, counts
+        stale = memory.get("pool_context") != pool_context(people, counts, allow, memory)
+        return original_dishes, clean_reply(intent.reply), bool(memory.get("blocked")) or stale or not original_dishes, people, counts
     old_ids = {d["recipe_id"] for d in original_dishes}
     targets, keeps = set(intent.target_recipe_ids), set(intent.keep_recipe_ids)
     if not (targets | keeps) <= old_ids or targets & keeps:
@@ -217,11 +298,20 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
         raise DomainError(422, "KEEP_COUNT_CONFLICT", "保留菜品超过本次分类数量，请明确新的构成")
     slots = [d["category_id"] for d in original_dishes if d["recipe_id"] in targets] if replace else [k for k, v in remaining.items() for _ in range(v)]
     allowed = {i["id"]: i for i in catalog if (allow or season_status_for(i) == "in_season") and not any(c.get("ingredient_id") == i["id"] for c in memory["constraints"])}
-    shortlist = sorted(pool, key=lambda d: d["season_coverage"], reverse=True)[:60]
-    selection = client.ask(Selection, SELECT_PROMPT, {"time": time_context(), "slots": slots, "keep_dishes": keep,
-        "constraints": memory["constraints"], "preferences": memory["preferences"], "candidate_recipes": shortlist,
-        "allowed_ingredients": list(allowed.values()), "recent_excluded_ids": list(recent_ids), "rejected_dish_names": [d["name"] for d in replaced]})
-    filled = fill_choices(selection, slots, {d["recipe_id"]: d for d in shortlist}, allowed, plan_id, memory["constraints"], keep, blocked_ids | recent_ids, blocked_sigs | recent_sigs)
+    shortlist = keep + sorted((d for d in pool if counts.get(d["category_id"], 0)), key=lambda d: d["season_coverage"], reverse=True)[:60]
+    selection = client.ask(Selection, SELECT_PROMPT, {"time": time_context(), "slots": slots, "keep_dishes": [model_dish(d) for d in keep],
+        "constraints": memory["constraints"], "preferences": memory["preferences"], "candidate_recipes": [model_dish(d) for d in shortlist],
+        "allowed_ingredients": [{"id": i["id"], "name": i["name"], "category": i["ingredient_category"]} for i in allowed.values()],
+        "rejected_dish_names": [d["name"] for d in replaced]})
+    lookup = {d["recipe_id"]: d for d in shortlist}
+    if len(set(selection.eligible_ids)) != len(selection.eligible_ids) or not set(selection.eligible_ids) <= lookup.keys():
+        raise DomainError(502, "AI_INVALID_POOL", "模型备选包含未知或重复菜谱，请重试")
+    approved = {i: lookup[i] for i in selection.eligible_ids}
+    if any(d["recipe_id"] not in approved for d in keep):
+        return original_dishes, "保留的菜可能不符合新要求，请明确是否允许一起替换。", True, people, counts
+    if any(conflicts(d, memory["constraints"]) for d in approved.values()):
+        raise DomainError(502, "AI_INVALID_POOL", "模型备选存在已知禁忌冲突，请重试")
+    filled = fill_choices(selection, slots, approved, allowed, plan_id, memory["constraints"], keep, blocked_ids | recent_ids, blocked_sigs | recent_sigs)
     if replace:
         iterator = iter(filled)
         result = [next(iterator) if d["recipe_id"] in targets else d for d in original_dishes]
@@ -229,6 +319,14 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
         result = keep + filled
     memory["rejected_ids"] = list(blocked_ids); memory["rejected_signatures"] = list(blocked_sigs)
     memory["unknown"] = [c["text"] for c in memory["constraints"]]
+    cached = {d["recipe_id"]: deepcopy(d) for d in [*approved.values(), *filled]}
+    for dish in cached.values():
+        dish["constraint_status"] = "needs_confirmation" if memory["constraints"] else "match"
+        dish["constraint_reason"] = "存在明确饮食限制，菜谱配料与做法可能不完整，请制作前核对" if memory["constraints"] else ""
+    memory["candidate_pool"] = list(cached.values())
+    memory["pool_context"] = pool_context(people, counts, allow, memory)
+    memory["pool_version"] = memory.get("pool_version", 0) + 1
+    memory["last_action"] = "chat"
     return result, clean_reply(selection.reply), False, people, counts
 
 
@@ -282,6 +380,7 @@ def register_ai_routes(api, session_factory, app):
             dishes, blocked, reply = original, True, exc.message
             people, counts = memory.get("people_count", people), memory.get("category_counts", counts)
         memory["blocked"] = blocked
+        memory["last_usage"] = getattr(client, "usage", {})
         if not blocked:
             memory["pending"] = []
         memory["messages"] = [*memory["messages"], {"role": "assistant", "content": reply}][-20:]
@@ -342,6 +441,10 @@ def register_ai_routes(api, session_factory, app):
                 if item["recipe_id"] == dish["recipe_id"]:
                     item["recipe_id"], item["source"] = recipe.id, "ai_saved"
             plan.dishes = updated; plan.revision += 1; plan.updated_at = now()
+            if plan.ai_memory and "candidate_pool" in plan.ai_memory:
+                memory = deepcopy(plan.ai_memory)
+                memory["candidate_pool"] = [{**d, "recipe_id": recipe.id, "source": "ai_saved"} if d["recipe_id"] == dish["recipe_id"] else d for d in memory["candidate_pool"]]
+                plan.ai_memory = memory
             session.commit()
             return plan_data(session, plan)
 
