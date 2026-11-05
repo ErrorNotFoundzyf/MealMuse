@@ -36,6 +36,7 @@ export default function MenuReview() {
       </View>
       {!!draft.recipeIds.length && <ShoppingList recipeIds={draft.recipeIds} recordId={draft.recordId} revision={draft.revision} planId={draft.rulePlan?.id} planRevision={draft.rulePlan?.revision} />}
       {!draft.rulePlan && <Text style={s.caption}>按自己挑方式确认，允许主动选择近期吃过的菜。</Text>}
+      {draft.rulePlan?.ai?.hearty_count != null && <Text style={s.caption}>本餐要求：{draft.rulePlan.ai.hearty_count}道带硬菜标签的菜品。</Text>}
       {!!unknown.length && <View style={s.card}><Text style={s.section}>确认前请核对</Text><Text style={s.caption}>{unknown.join('、')}：菜谱可能未完整记录调料或做法，不能据此保证满足限制。</Text><View style={s.between}><Text style={[s.body, { flex: 1 }]}>我会核对配料与做法</Text><Switch accessibilityLabel="我会核对配料与做法" value={acknowledged} onValueChange={setAcknowledged} /></View></View>}
       {draft.rulePlan?.ai?.blocked && <Notice text="本轮要求还未处理完成，请返回对话继续说明或重试。" error />}
       <Button label={draft.recordId ? '保存更正' : '确认菜单并记入食记'} busy={busy} disabled={!draft.recipeIds.length || !!draft.rulePlan?.ai?.blocked || (!!unknown.length && !acknowledged)} onPress={save} />

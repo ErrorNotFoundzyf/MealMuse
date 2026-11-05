@@ -104,7 +104,15 @@ def mains(dish):
     return {i["ingredient_id"] for i in dish["ingredients"] if i["is_main"]}
 
 
-def select_menu(pool, counts, avoid_ids=(), allow_nonseasonal=False):
+def is_hearty(dish):
+    return dish.get("is_hearty", False) or dish["category_id"] == "hearty"
+
+
+def meets_hearty_count(dishes, required):
+    return required is None or sum(bool(is_hearty(d)) for d in dishes) == required
+
+
+def select_menu(pool, counts, avoid_ids=(), allow_nonseasonal=False, hearty_count=None):
     names = {"meat": "荤菜", "vegetable": "素菜", "soup": "汤"}
     shortage = []
     for category, count in counts.items():
@@ -119,7 +127,7 @@ def select_menu(pool, counts, avoid_ids=(), allow_nonseasonal=False):
     slots = [category for category, count in counts.items() for _ in range(count)]
     slots.sort(key=lambda category: sum(d["category_id"] == category for d in pool))
     beam = [(0.0, [])]
-    for category in slots:
+    for slot_index, category in enumerate(slots):
         next_beam = {}
         for score, chosen in beam:
             used = {signature(d) for d in chosen}
@@ -130,6 +138,10 @@ def select_menu(pool, counts, avoid_ids=(), allow_nonseasonal=False):
                 value = dish["season_coverage"] * 10 - sum(ingredients[i] for i in mains(dish)) * 0.7 + jitter
                 value -= 1.5 if dish["recipe_id"] in avoid_ids else 0
                 selection = chosen + [dish]
+                if hearty_count is not None:
+                    hearty = sum(bool(is_hearty(d)) for d in selection)
+                    if hearty > hearty_count or hearty + len(slots) - slot_index - 1 < hearty_count:
+                        continue
                 key = tuple(sorted(signature(d) for d in selection))
                 if key not in next_beam or score + value > next_beam[key][0]:
                     next_beam[key] = (score + value, selection)
@@ -170,7 +182,7 @@ def plan_data(session, plan):
     return {"id": plan.id, "revision": plan.revision, "people_count": plan.people_count, "category_counts": plan.category_counts,
             "as_of_date": plan.as_of_date, "dishes": plan.dishes, "allow_nonseasonal": plan.allow_nonseasonal,
             "confirmed_record_id": plan.confirmed_record_id, "shopping_list": shopping_list(session, plan.dishes), "mode": "chat" if plan.ai_memory else "rules",
-            "ai": {**{key: plan.ai_memory.get(key) for key in ("messages", "blocked", "unknown", "pending", "constraints", "pool_version", "last_action", "last_usage")},
+            "ai": {**{key: plan.ai_memory.get(key) for key in ("messages", "blocked", "unknown", "pending", "constraints", "pool_version", "last_action", "last_usage", "hearty_count")},
                    "has_candidate_pool": "candidate_pool" in plan.ai_memory,
                    "candidate_counts": dict(Counter(d["category_id"] for d in plan.ai_memory.get("candidate_pool", [])))} if plan.ai_memory else None}
 
@@ -190,6 +202,8 @@ def validate_plan_confirmation(session, plan_id, revision, recipe_ids, people, m
             raise DomainError(422, "CHECK_CONSTRAINTS", "存在明确饮食限制，确认前请核对配料与做法并勾选提示")
         recent_ids, recent_sigs = recent_exclusions(session, time_context()["as_of_date"])
         dishes = snapshots(session, recipe_ids, plan.dishes) if manual_adjustment else plan.dishes
+        if not meets_hearty_count(dishes, plan.ai_memory.get("hearty_count")):
+            raise DomainError(409, "HEARTY_COUNT_MISMATCH", "菜单不满足本餐硬菜数量要求，请调整或通过对话修改要求")
         fresh = {d["recipe_id"]: d for d in candidates(session, plan.allow_nonseasonal)}
         for dish in dishes:
             states = season_info(session, dish, time_context()["current_season"])
@@ -198,7 +212,7 @@ def validate_plan_confirmation(session, plan_id, revision, recipe_ids, people, m
             if not manual_adjustment:
                 if dish["recipe_id"] in recent_ids or signature(dish) in recent_sigs or (not plan.allow_nonseasonal and any(s["status"] != "in_season" for s in states)):
                     raise DomainError(409, "PLAN_NO_LONGER_VALID", "近期记录或季节已变化，请重新搭配")
-                if not dish["recipe_id"].startswith("tmp_") and (dish["recipe_id"] not in fresh or any(fresh[dish["recipe_id"]].get(k) != dish.get(k) for k in ("name", "category_id", "ingredients", "steps", "notes"))):
+                if not dish["recipe_id"].startswith("tmp_") and (dish["recipe_id"] not in fresh or any(fresh[dish["recipe_id"]].get(k) != dish.get(k) for k in ("name", "category_id", "ingredients", "steps", "notes", "is_hearty"))):
                     raise DomainError(409, "PLAN_NO_LONGER_VALID", "菜谱已变化，请重新搭配")
         return plan
     available = {d["recipe_id"]: d for d in candidates(session, plan.allow_nonseasonal, plan.rejected_ids, plan.rejected_signatures)}

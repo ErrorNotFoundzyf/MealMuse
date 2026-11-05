@@ -275,3 +275,109 @@ def test_old_ai_plan_requires_explicit_chat_to_create_pool(env):
         plan=session.get(RulePlan,first['id']);memory=deepcopy(plan.ai_memory);memory.pop('candidate_pool');plan.ai_memory=memory;session.commit()
     forbid_model(client)
     assert swap(client,first).json()['error']['code']=='POOL_REFRESH_REQUIRED'
+
+
+def mark_hearty(client, ids):
+    with Session(client.app.state.engine) as session:
+        for recipe_id in ids:
+            session.get(Recipe,recipe_id).is_hearty=True
+        session.commit()
+
+
+def hearty_selection(context):
+    choices=[];used={d['recipe_id'] for d in context['keep_dishes']}
+    need=context['hearty_count']-sum(d['is_hearty'] for d in context['keep_dishes'])
+    for slot,category in enumerate(context['slots']):
+        available=[d for d in context['candidate_recipes'] if d['recipe_id'] not in used and d['category_id']==category]
+        preferred=next((d for d in available if d['is_hearty'] and need>0),None)
+        chosen=preferred or next(d for d in available if not d['is_hearty'])
+        used.add(chosen['recipe_id']);need-=int(chosen['is_hearty'])
+        choices.append({'slot':slot,'candidate_id':chosen['recipe_id'],'suitability':'match','reason':'按库内标签搭配'})
+    return {'eligible_ids':[d['recipe_id'] for d in context['candidate_recipes']],'choices':choices,'reply':'已按菜谱标签搭配'}
+
+
+def test_direct_chat_hearty_is_an_extra_label_inside_existing_counts(env):
+    client,fake=env
+    mark_hearty(client,['r_shiitake_chicken','r_radish_ribs'])
+    # Even if parsing mistakes one hearty dish for one meat dish, preserve the configured meal.
+    fake.intent={'action':'generate','category_counts':{'meat':1},'reply':'搭配'}
+    fake.select=hearty_selection
+    counts={'meat':2,'vegetable':1,'soup':1}
+    first=chat(client,message='今天想吃一道硬菜',category_counts=counts).json()
+    assert not first['ai']['blocked']
+    assert first['ai']['hearty_count']==1 and first['category_counts']==counts
+    assert len(first['dishes'])==4 and sum(d['is_hearty'] for d in first['dishes'])==1
+    assert '标签的菜有1道' in first['ai']['messages'][-1]['content']
+    assert all('is_hearty' in d for d in fake.calls[-1][1]['candidate_recipes'])
+    assert confirm(client,first).status_code==201
+
+
+def test_model_cannot_call_ordinary_meat_a_hearty_dish(env):
+    client,fake=env
+    mark_hearty(client,['r_radish_ribs'])
+    fake.select=lambda c:{'eligible_ids':[d['recipe_id'] for d in c['candidate_recipes']],
+        'choices':[{'slot':0,'candidate_id':'r_shiitake_chicken','suitability':'match','reason':'这是硬菜'}], 'reply':'普通荤菜也算硬菜'}
+    first=chat(client,message='我想吃一道硬菜',category_counts={'meat':1}).json()
+    assert first['ai']['blocked'] and first['dishes']==[]
+    assert 'candidate_pool' not in first['ai']
+    assert not first['ai']['has_candidate_pool']
+
+
+def test_no_tagged_hearty_reports_shortage_without_generating_fake_tag(env):
+    client,fake=env
+    first=chat(client,message='想吃一道硬菜').json()
+    assert first['ai']['blocked'] and not first['dishes']
+    assert len(fake.calls)==1
+    assert '硬菜标签' in first['ai']['messages'][-1]['content']
+
+
+def test_hearty_can_be_a_vegetable_and_need_not_increase_meat_count(env):
+    client,fake=env
+    mark_hearty(client,['r_cabbage_tofu'])
+    fake.select=hearty_selection
+    first=chat(client,message='来一道硬菜，其他照旧').json()
+    assert not first['ai']['blocked'] and first['category_counts']=={'meat':1,'vegetable':2,'soup':1}
+    assert next(d for d in first['dishes'] if d['is_hearty'])['category_id']=='vegetable'
+
+
+def test_hearty_requirement_survives_rule_swap_regenerate_and_dialogue(env):
+    client,fake=env
+    mark_hearty(client,['r_shiitake_chicken','r_radish_ribs','r_potato_beef'])
+    fake.select=hearty_selection
+    counts={'meat':1,'vegetable':1,'soup':1}
+    first=chat(client,message='想吃一道硬菜',category_counts=counts).json()
+    second=chat(client,first,message='口味家常一点',category_counts=counts).json()
+    assert not second['ai']['blocked'] and second['ai']['hearty_count']==1
+    forbid_model(client)
+    changed=swap(client,second)
+    assert changed.status_code==200
+    third=changed.json()
+    assert third['dishes'][0]['is_hearty'] and third['ai']['hearty_count']==1
+    regenerated=swap(client,third,regenerate=True)
+    assert regenerated.status_code==200
+    assert sum(d['is_hearty'] for d in regenerated.json()['dishes'])==1
+
+
+def test_hearty_count_checked_again_for_manual_confirmation_and_label_edits(env):
+    client,fake=env
+    mark_hearty(client,['r_shiitake_chicken'])
+    fake.select=hearty_selection
+    first=chat(client,message='想吃一道硬菜',category_counts={'meat':1}).json()
+    manual=confirm(client,first,manual_adjustment=True,recipe_ids=['r_tomato_egg'])
+    assert manual.status_code==409 and manual.json()['error']['code']=='HEARTY_COUNT_MISMATCH'
+    with Session(client.app.state.engine) as session:
+        session.get(Recipe,first['dishes'][0]['recipe_id']).is_hearty=False
+        session.commit()
+    assert confirm(client,first).status_code==409
+
+
+def test_hearty_quota_can_be_changed_and_removed_explicitly(env):
+    from app.ai_planning import merge_hearty_requirement
+    memory={'hearty_count':1}
+    intent=Intent(action='generate',reply='test')
+    merge_hearty_requirement(memory,intent,['来两道硬菜'])
+    assert memory['hearty_count']==2
+    merge_hearty_requirement(memory,intent,['先来一道硬菜','不要硬菜'])
+    assert memory['hearty_count']==0
+    merge_hearty_requirement(memory,intent,['硬菜数量不限'])
+    assert 'hearty_count' not in memory
