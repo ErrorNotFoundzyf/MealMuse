@@ -379,9 +379,15 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
     memory["pool_version"] = memory.get("pool_version", 0) + 1
     memory["last_action"] = "chat"
     reply = clean_reply(selection.reply)
-    if required is not None or "硬菜" in reply:
+    if "硬菜" in reply:
         tagged = [d["name"] for d in result if is_hearty(d)]
-        reply = f"已搭配{len(result)}道菜，其中带硬菜标签的菜有{len(tagged)}道" + ("：" + "、".join(tagged) if tagged else "") + "。硬菜按菜谱库标签统计。"
+        numbers = {"零": 0, "一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5}
+        claims = re.findall(r"(\d+|[零一两二三四五])\s*(?:道|个|份)\s*(?:带硬菜标签的菜|硬菜)", reply)
+        claims += re.findall(r"硬菜(?:的数量)?(?:有|共|为|是)\s*(\d+|[零一两二三四五])\s*(?:道|个|份)", reply)
+        wrong_count = any((int(n) if n.isdigit() else numbers[n]) != len(tagged) for n in claims)
+        wrong_name = any(re.search(re.escape(d["name"]) + r"[^。；！\n]{0,22}(?:是|作为|算作|属于|提供)[^。；！\n]{0,8}硬菜", reply) for d in result if not is_hearty(d))
+        if wrong_count or wrong_name:
+            reply = "已按本次要求调整菜单。" + ("本餐的硬菜：" + "、".join(tagged) + "。" if tagged else "本餐没有选用硬菜。")
     return result, reply, False, people, counts
 
 

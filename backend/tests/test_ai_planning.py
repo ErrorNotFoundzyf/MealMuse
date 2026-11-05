@@ -357,7 +357,7 @@ def test_direct_chat_hearty_is_an_extra_label_inside_existing_counts(env):
     assert not first['ai']['blocked']
     assert first['ai']['hearty_count']==1 and first['category_counts']==counts
     assert len(first['dishes'])==4 and sum(d['is_hearty'] for d in first['dishes'])==1
-    assert '标签的菜有1道' in first['ai']['messages'][-1]['content']
+    assert '硬菜' in first['ai']['messages'][-1]['content'] or first['ai']['messages'][-1]['content']=='已按菜谱标签搭配'
     assert all('is_hearty' in d for d in fake.calls[-1][1]['candidate_recipes'])
     assert confirm(client,first).status_code==201
 
@@ -406,6 +406,35 @@ def test_hearty_requirement_survives_rule_swap_regenerate_and_dialogue(env):
     regenerated=swap(client,third,regenerate=True)
     assert regenerated.status_code==200
     assert sum(d['is_hearty'] for d in regenerated.json()['dishes'])==1
+
+
+@pytest.mark.parametrize('required', [0, 1])
+def test_hearty_memory_does_not_replace_normal_dialogue_reply(env, required):
+    client,fake=env
+    mark_hearty(client,['r_shiitake_chicken','r_radish_ribs'])
+    fake.select=hearty_selection
+    initial='想吃一道硬菜' if required else '不要硬菜'
+    first=chat(client,message=initial,category_counts={'meat':1}).json()
+    assert not first['ai']['blocked'] and first['ai']['hearty_count']==required
+    fake.intent={'action':'replace','target_recipe_ids':[first['dishes'][0]['recipe_id']],'reply':'好的'}
+    def choose(context):
+        result=hearty_selection(context)
+        result['reply']='这道已经换好，请看看新菜是否合适。'
+        return result
+    fake.select=choose
+    second=chat(client,first,message='换掉这道菜',category_counts={'meat':1}).json()
+    assert not second['ai']['blocked']
+    assert second['ai']['messages'][-1]['content']=='这道已经换好，请看看新菜是否合适。'
+    assert second['ai']['hearty_count']==required
+
+
+def test_false_hearty_claim_is_corrected_but_valid_model_reply_is_preserved(env):
+    client,fake=env
+    fake.select=lambda c:{'eligible_ids':[d['recipe_id'] for d in c['candidate_recipes']],
+        'choices':[{'slot':0,'candidate_id':'r_shiitake_chicken','suitability':'match','reason':'家常'}], 'reply':'香菇炖鸡是硬菜。'}
+    result=chat(client,message='帮我搭配',category_counts={'meat':1}).json()
+    assert not result['ai']['blocked']
+    assert '没有选用硬菜' in result['ai']['messages'][-1]['content']
 
 
 def test_hearty_count_checked_again_for_manual_confirmation_and_label_edits(env):
