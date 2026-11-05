@@ -45,7 +45,8 @@ export function useAiChat(planning: PlanningSettings) {
   function requestSave(recipeId: string) {
     Alert.alert('保存到菜谱库？', '将保存菜名、分类和主要食材；不会自动补全步骤或用量。', [{ text: '取消', style: 'cancel' }, { text: '保存', onPress: () => saveTemporary(recipeId) }]);
   }
-  return { input, setInput, busy, error, status, send, requestSave };
+  function reset() { setInput(''); setError(''); pending.current = null; }
+  return { input, setInput, busy, error, status, send, requestSave, reset };
 }
 
 export function ChatMessages({ plan }: { plan?: RulePlan }) {
