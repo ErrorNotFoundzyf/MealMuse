@@ -40,7 +40,7 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
   const chat = useAiChat(effective);
   const busy = ruleBusy || chat.busy;
   const displayDishes = menu.draft.dishes;
-  const dishCardHeight = 124 + Math.max(0, fontScale - 1) * 80 + (displayDishes.some(d => d.source === 'ai_temporary') ? 50 : 0) + (displayDishes.some(d => d.season_warnings?.length) ? 28 : 0);
+  const dishCardHeight = 124 + Math.max(0, fontScale - 1) * 80 + (displayDishes.some(d => d.source === 'ai_temporary') ? 64 : 0) + (displayDishes.some(d => d.season_warnings?.length) ? 34 : 0);
   const complete = !!profile.data?.profile || !!menu.draft.planning || !!plan;
   function openSettings() {
     setPeople(effective.people_count); setCounts({ ...effective.category_counts }); setAllow(effective.allow_nonseasonal); setSheet(true);
