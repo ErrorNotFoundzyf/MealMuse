@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { ActivityIndicator, Alert, FlatList, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { allPages, errorText, useApi, useResource } from '../../src/api';
 import { RulePanel } from '../../src/rule-panel';
@@ -13,6 +14,7 @@ import type { Category, Recipe } from '../../src/types';
 export default function Inspiration() {
   const api = useApi(); const menu = useMenu(); const params = useLocalSearchParams<{ pick?: string }>();
   const [mode, setMode] = useState('pick'); const [search, setSearch] = useState(''); const [category, setCategory] = useState('');
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [catalog, setCatalog] = useState<Recipe[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [retry, setRetry] = useState(0);
   const categories = useResource<Category[]>('/dish-categories');
   useEffect(() => { if (params.pick) { setMode('pick'); router.setParams({ pick: undefined }); } }, [params.pick]);
@@ -34,7 +36,8 @@ export default function Inspiration() {
     if (!menu.ready || !!menu.draft.outgoing || !menu.draft.recipeIds.length) return;
     Alert.alert('清空已选菜品？', '当前日期和人数会保留，已保存的食记不会改变。', [{ text: '取消', style: 'cancel' }, { text: '清空已选', style: 'destructive', onPress: () => menu.setDraft(old => ({ ...old, rulePlan: old.rulePlan?.mode === 'chat' ? { ...old.rulePlan, ai: { ...old.rulePlan.ai!, blocked: true } } : undefined, manualAdjustment: old.rulePlan?.mode === 'chat', recipeIds: [], dishes: [], requestKey: requestKey() })) }]);
   }
-  return <LibraryPage title="吃饭灵感">
+  return <LibraryPage title="吃饭灵感" headerRight={<Pressable accessibilityRole="button" accessibilityLabel="查看搭配规则" onPress={() => setRulesOpen(true)} style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, borderWidth: 1, borderColor: colors.line, borderRadius: 12 }}><Ionicons name="information-circle-outline" size={17} color={colors.green} /><Text style={{ color: colors.green, fontSize: 13, fontWeight: '600' }}>搭配规则</Text></Pressable>}>
+    <Modal visible={rulesOpen} transparent animationType="fade" onRequestClose={() => setRulesOpen(false)}><View style={l.overlay}><Pressable accessibilityRole="button" accessibilityLabel="关闭搭配规则" onPress={() => setRulesOpen(false)} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 }} /><SafeAreaView edges={['bottom', 'left', 'right']} accessibilityViewIsModal style={[l.sheet, { gap: 12 }]}><View style={s.between}><Text style={s.section}>搭配规则</Text><Pressable accessibilityRole="button" accessibilityLabel="关闭搭配规则" onPress={() => setRulesOpen(false)} style={l.iconButton}><Ionicons name="close" size={22} color={colors.ink} /></Pressable></View><ScrollView contentContainerStyle={{ gap: 12, paddingBottom: 8 }}><View style={{ gap: 5 }}><Text style={[s.body, { fontWeight: '700' }]}>帮我搭配</Text><Text style={s.caption}>按本次人数和菜数搭配，也可以说出想吃的、忌口或换菜要求。</Text><Text style={s.caption}>默认选用当季或全年食材；可在「人数与菜数」中允许非当季食材。</Text><Text style={s.caption}>自动搭配会避开今天和前两天已确认的菜；换一道、换整桌从本轮备选中挑选。</Text></View><View style={{ gap: 5 }}><Text style={[s.body, { fontWeight: '700' }]}>自己挑</Text><Text style={s.caption}>从菜谱库自由选菜，可以选择最近吃过的菜。</Text></View><Text style={s.caption}>选好后确认菜单，菜品就会记入食记。</Text></ScrollView><Pressable accessibilityRole="button" onPress={() => setRulesOpen(false)} style={[l.sheetAction, { backgroundColor: colors.green }]}><Text style={l.addText}>知道了</Text></Pressable></SafeAreaView></View></Modal>
     <View style={{ flexDirection: 'row', padding: 3, borderWidth: 1, borderColor: colors.line, borderRadius: 12, marginBottom: 10 }}>{[{ key: 'ai', label: '帮我搭配' }, { key: 'pick', label: '自己挑' }].map(o => <Pressable key={o.key} accessibilityRole="button" accessibilityState={{ selected: mode === o.key }} onPress={() => setMode(o.key)} style={{ flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 9, backgroundColor: mode === o.key ? colors.green : 'transparent' }}><Text style={{ fontSize: 16, fontWeight: '700', color: mode === o.key ? '#fff' : colors.muted }}>{o.label}</Text></Pressable>)}</View>
     {!!menu.error && <Notice text={menu.error} error />}
     {!menu.ready ? <Loading /> : mode === 'ai' ? <RulePanel onManual={() => setMode('pick')} /> : <>

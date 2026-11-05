@@ -6,12 +6,12 @@ import { colors, s } from './ui';
 import type { Category } from './types';
 import { RecipeTags } from './tags';
 
-export function RecipeBadges({ recipe, categories }: { recipe: { category_id: string; is_hearty?: boolean }; categories: Category[] }) {
-  return <RecipeTags recipe={recipe} categories={categories} />;
+export function RecipeBadges({ recipe, categories, small = false }: { recipe: { category_id: string; is_hearty?: boolean }; categories: Category[]; small?: boolean }) {
+  return <RecipeTags recipe={recipe} categories={categories} small={small} />;
 }
 
-export function LibraryPage({ title, context, action, actionIcon = 'add', onAdd, children }: React.PropsWithChildren<{ title: string; context?: string; action?: string; actionIcon?: React.ComponentProps<typeof Ionicons>['name']; onAdd?: () => void }>) {
-  return <SafeAreaView style={s.page} edges={['top', 'left', 'right']}><KeyboardAvoidingView style={l.page} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}><View style={l.heading}><View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}><Text style={l.title}>{title}</Text>{context && <Text numberOfLines={1} style={[l.context, { flexShrink: 1 }]}>{context}</Text>}</View>{action && onAdd && <Pressable accessibilityRole="button" onPress={onAdd} style={({ pressed }) => [l.add, { opacity: pressed ? 0.7 : 1 }]}><Ionicons name={actionIcon} size={20} color="#fff" /><Text style={l.addText}>{action}</Text></Pressable>}</View>{children}</KeyboardAvoidingView></SafeAreaView>;
+export function LibraryPage({ title, context, action, actionIcon = 'add', onAdd, headerRight, children }: React.PropsWithChildren<{ title: string; context?: string; action?: string; actionIcon?: React.ComponentProps<typeof Ionicons>['name']; onAdd?: () => void; headerRight?: React.ReactNode }>) {
+  return <SafeAreaView style={s.page} edges={['top', 'left', 'right']}><KeyboardAvoidingView style={l.page} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}><View style={l.heading}><View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}><Text style={l.title}>{title}</Text>{context && <Text numberOfLines={1} style={[l.context, { flexShrink: 1 }]}>{context}</Text>}</View>{headerRight}{action && onAdd && <Pressable accessibilityRole="button" onPress={onAdd} style={({ pressed }) => [l.add, { opacity: pressed ? 0.7 : 1 }]}><Ionicons name={actionIcon} size={20} color="#fff" /><Text style={l.addText}>{action}</Text></Pressable>}</View>{children}</KeyboardAvoidingView></SafeAreaView>;
 }
 export function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   return <View style={l.search}><Ionicons name="search-outline" size={21} color={colors.muted} /><TextInput style={l.searchInput} accessibilityLabel={placeholder} placeholder={placeholder} placeholderTextColor={colors.muted} value={value} onChangeText={onChange} autoCorrect={false} autoCapitalize="none" returnKeyType="search" />{!!value && <Pressable accessibilityRole="button" accessibilityLabel="清空搜索" onPress={() => onChange('')} style={l.iconButton}><Ionicons name="close-circle" size={19} color={colors.muted} /></Pressable>}</View>;
