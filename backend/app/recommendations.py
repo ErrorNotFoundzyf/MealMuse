@@ -16,6 +16,7 @@ from .schemas import Input, normalize
 from .season import season_status, time_context
 
 CATEGORIES = {"meat", "vegetable", "soup"}
+EXTRA_CATEGORIES = {"dessert", "fruit"}
 
 
 class GenerateInput(Input):
@@ -84,7 +85,7 @@ def candidates(session, allow_nonseasonal, rejected_ids=(), rejected_signatures=
     recent_ids, recent_signatures = recent_exclusions(session, clock["as_of_date"])
     blocked_ids, blocked_signatures = recent_ids | set(rejected_ids), recent_signatures | set(rejected_signatures)
     pool = []
-    recipes = session.scalars(select(Recipe).where(Recipe.deleted_at.is_(None), Recipe.is_hidden.is_(False), Recipe.category_id.in_(CATEGORIES)))
+    recipes = session.scalars(select(Recipe).where(Recipe.deleted_at.is_(None), Recipe.is_hidden.is_(False), Recipe.category_id.in_(CATEGORIES | EXTRA_CATEGORIES)))
     for recipe in recipes:
         if recipe.id in blocked_ids:
             continue
@@ -113,7 +114,7 @@ def meets_hearty_count(dishes, required):
 
 
 def select_menu(pool, counts, avoid_ids=(), allow_nonseasonal=False, hearty_count=None):
-    names = {"meat": "荤菜", "vegetable": "素菜", "soup": "汤"}
+    names = {"meat": "荤菜", "vegetable": "素菜", "soup": "汤", "dessert": "甜点", "fruit": "水果"}
     shortage = []
     for category, count in counts.items():
         available = {signature(d) for d in pool if d["category_id"] == category}

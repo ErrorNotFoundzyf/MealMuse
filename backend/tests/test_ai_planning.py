@@ -1,5 +1,6 @@
 from uuid import uuid4
 from copy import deepcopy
+from collections import Counter
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -48,6 +49,92 @@ def chat(client, plan=None, message='帮我搭配', **extra):
     return client.post('/api/v1/ai/chat',json={'request_key':str(uuid4()),'message':message,'people_count':4,'category_counts':{'meat':1,'vegetable':2,'soup':1},'allow_nonseasonal':True,**({'plan_id':plan['id'],'expected_revision':plan['revision']} if plan else {}),**extra})
 def confirm(client,plan,**extra):
     return client.post('/api/v1/meal-records',json={'request_key':str(uuid4()),'meal_date':time_context()['as_of_date'],'people_count':4,'recipe_ids':[d['recipe_id'] for d in plan['dishes']],'plan_id':plan['id'],'plan_revision':plan['revision'],**extra})
+
+
+@pytest.mark.parametrize(('category', 'label'), [('dessert', '甜点'), ('fruit', '水果')])
+def test_extra_item_is_added_swapped_confirmed_and_then_recently_excluded(env, category, label):
+    client, fake = env
+    ids = []
+    for name in (label + '一号', label + '二号', label + '三号'):
+        response = client.post('/api/v1/recipes', json={'name': name, 'category_id': category, 'ingredients': [{'ingredient_id': 'i_egg'}]})
+        assert response.status_code == 201
+        ids.append(response.json()['id'])
+    first = chat(client, category_counts={'meat': 1, 'vegetable': 1}).json()
+    original = deepcopy(first['dishes'])
+    fake.intent = {'action': 'chat', 'reply': '可以'}  # A simple explicit add is enforced even if the model merely chats.
+    added = chat(client, first, '我想加一个' + label, category_counts={'meat': 1, 'vegetable': 1}).json()
+    assert not added['ai']['blocked'] and added['dishes'][:2] == original
+    assert added['category_counts'] == {'meat': 1, 'vegetable': 1}
+    extra = next(d for d in added['dishes'] if d['category_id'] == category)
+    assert extra['recipe_id'] in ids and len(added['dishes']) == 3
+    forbid_model(client)
+    swapped = client.post('/api/v1/recommendations/' + added['id'] + '/replace', json={'request_key': str(uuid4()), 'expected_revision': added['revision'], 'recipe_id': extra['recipe_id']})
+    assert swapped.status_code == 200
+    final = swapped.json()
+    assert final['dishes'][:2] == original and final['dishes'][-1]['recipe_id'] != extra['recipe_id']
+    assert confirm(client, final).status_code == 201
+    from app.recommendations import candidates
+    with Session(client.app.state.engine) as session:
+        assert final['dishes'][-1]['recipe_id'] not in {d['recipe_id'] for d in candidates(session, True)}
+
+
+def test_missing_extra_keeps_existing_menu_and_explains_shortage(env):
+    client, fake = env
+    first = chat(client, category_counts={'vegetable': 1}).json()
+    fake.intent = {'action': 'add', 'extra_add': {'dessert': 1}, 'reply': '添加甜点'}
+    failed = chat(client, first, '加一个甜点', category_counts={'vegetable': 1}).json()
+    assert failed['ai']['blocked'] and failed['dishes'] == first['dishes']
+    assert '甜点菜谱不足' in failed['ai']['messages'][-1]['content']
+
+
+def test_replace_vegetable_with_dessert_changes_only_current_menu(env):
+    client, fake = env
+    dessert = client.post('/api/v1/recipes', json={'name': '甜点测试', 'category_id': 'dessert', 'ingredients': [{'ingredient_id': 'i_egg'}]}).json()
+    first = chat(client, category_counts={'meat': 1, 'vegetable': 1}).json()
+    target = next(d for d in first['dishes'] if d['category_id'] == 'vegetable')
+    fake.intent = {'action': 'replace', 'target_recipe_ids': [target['recipe_id']], 'replace_with_extra': {target['recipe_id']: 'dessert'}, 'reply': '好的'}
+    result = chat(client, first, '把' + target['name'] + '换成甜点', category_counts={'meat': 1, 'vegetable': 1}).json()
+    assert not result['ai']['blocked']
+    assert result['category_counts'] == {'meat': 1, 'vegetable': 0}
+    assert {d['recipe_id'] for d in result['dishes']} == {first['dishes'][0]['recipe_id'], dessert['id']}
+    assert confirm(client, result).status_code == 201
+
+
+def test_offline_explicit_add_keeps_menu(env):
+    client, fake = env
+    client.post('/api/v1/recipes', json={'name': '水果测试', 'category_id': 'fruit', 'ingredients': [{'ingredient_id': 'i_egg'}]})
+    first = chat(client, category_counts={'meat': 1}).json()
+    fake.failure = True
+    result = chat(client, first, '加一个水果', category_counts={'meat': 1}).json()
+    assert not result['ai']['blocked'] and result['dishes'][0] == first['dishes'][0]
+    assert result['dishes'][1]['category_id'] == 'fruit'
+
+
+def test_extra_survives_settings_change_and_rule_regeneration(env):
+    client, fake = env
+    for name in ('甜点甲', '甜点乙', '甜点丙'):
+        assert client.post('/api/v1/recipes', json={'name': name, 'category_id': 'dessert', 'ingredients': [{'ingredient_id': 'i_egg'}]}).status_code == 201
+    first = chat(client, category_counts={'meat': 1}).json()
+    fake.intent = {'action': 'add', 'extra_add': {'dessert': 1}, 'reply': '添加甜点'}
+    added = chat(client, first, '加一个甜点', category_counts={'meat': 1}).json()
+    fake.intent = {'action': 'generate', 'reply': '更新配置'}
+    updated = chat(client, added, '按新配置搭配', category_counts={'meat': 1, 'vegetable': 1}, settings_change=True).json()
+    assert not updated['ai']['blocked']
+    assert Counter(d['category_id'] for d in updated['dishes']) == {'meat': 1, 'vegetable': 1, 'dessert': 1}
+    forbid_model(client)
+    regenerated = swap(client, updated, regenerate=True)
+    assert regenerated.status_code == 200
+    assert Counter(d['category_id'] for d in regenerated.json()['dishes']) == {'meat': 1, 'vegetable': 1, 'dessert': 1}
+
+
+def test_failed_cross_category_replacement_preserves_original_counts(env):
+    client, fake = env
+    first = chat(client, category_counts={'meat': 1, 'vegetable': 1}).json()
+    target = next(d for d in first['dishes'] if d['category_id'] == 'vegetable')
+    fake.intent = {'action': 'replace', 'target_recipe_ids': [target['recipe_id']], 'replace_with_extra': {target['recipe_id']: 'dessert'}, 'reply': '好的'}
+    result = chat(client, first, '把' + target['name'] + '换成甜点', category_counts={'meat': 1, 'vegetable': 1}).json()
+    assert result['ai']['blocked'] and result['dishes'] == first['dishes']
+    assert result['category_counts'] == first['category_counts']
 
 def test_ai_selects_and_two_target_replacement_freezes_other_two(env):
     client,fake=env

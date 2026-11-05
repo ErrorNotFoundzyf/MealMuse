@@ -9,6 +9,7 @@ import { Button, colors, Field, Loading, Notice, Page, s, Stepper } from '../src
 import { ShoppingList } from '../src/shopping-list';
 import { l } from '../src/library-ui';
 import type { MealRecord } from '../src/types';
+import { mealItemSummary } from '../src/types';
 
 export default function MenuReview() {
   const menu = useMenu(); const api = useApi();
@@ -26,12 +27,12 @@ export default function MenuReview() {
       setSaved(record); menu.resetIfKey(draft.requestKey); api.changed();
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
-  if (saved) return <Page belowHeader title="已记入食记" subtitle={`${saved.meal_date} · ${saved.people_count}人 · ${saved.dishes.length}道菜`}><Notice text="菜单已经保存，可以在食记日历中查看和更正。" /><Button label="查看食记" onPress={() => router.replace({ pathname: '/journal', params: { date: saved.meal_date } })} /><Button label="再选一餐" secondary onPress={() => router.replace({ pathname: '/', params: { pick: '1' } })} /></Page>;
+  if (saved) return <Page belowHeader title="已记入食记" subtitle={`${saved.meal_date} · ${saved.people_count}人 · ${mealItemSummary(saved.dishes)}`}><Notice text="菜单已经保存，可以在食记日历中查看和更正。" /><Button label="查看食记" onPress={() => router.replace({ pathname: '/journal', params: { date: saved.meal_date } })} /><Button label="再选一餐" secondary onPress={() => router.replace({ pathname: '/', params: { pick: '1' } })} /></Page>;
   return <Page belowHeader title={draft.recordId ? '更正这份菜单' : '本餐菜单'} subtitle="确认后记入食记；日常配饭不计入菜数。">
     {!menu.ready ? <Loading /> : <>
       {!!error && <Notice text={error} error />}{!!menu.error && <Notice text={menu.error} error />}
       <View style={[s.card, { gap: 10 }]}><Field label="记录日期" value={draft.mealDate} onChange={changeDate} placeholder="YYYY-MM-DD" /><Text style={s.caption}>可以补记过去的菜单，不记录未来计划。</Text><Stepper label="用餐人数" value={draft.people} min={1} max={30} onChange={people => menu.setDraft(old => ({ ...old, people, requestKey: requestKey() }))} /></View>
-      <View style={[s.card, { gap: 8 }]}><View style={s.between}><Text style={s.section}>已选 {draft.recipeIds.length} 道菜</Text><Pressable accessibilityRole="button" disabled={busy} style={l.filterButton} onPress={() => router.navigate({ pathname: '/', params: { pick: '1' } })}><Text style={{ color: colors.green, fontSize: 14 }}>继续挑菜</Text></Pressable></View>
+      <View style={[s.card, { gap: 8 }]}><View style={s.between}><Text style={[s.section, { flexShrink: 1 }]}>已选 {mealItemSummary(draft.dishes.filter(d => draft.recipeIds.includes(d.recipe_id)))}</Text><Pressable accessibilityRole="button" disabled={busy} style={l.filterButton} onPress={() => router.navigate({ pathname: '/', params: { pick: '1' } })}><Text style={{ color: colors.green, fontSize: 14 }}>继续挑菜</Text></Pressable></View>
         {!draft.recipeIds.length && <Text style={s.caption}>还没有选菜，返回后从菜谱中挑几道。</Text>}
         {draft.dishes.filter(d => draft.recipeIds.includes(d.recipe_id)).map(d => <View key={d.recipe_id} style={[s.between, { borderTopWidth: 1, borderColor: colors.line, paddingTop: 8 }]}><View style={{ flex: 1 }}><Text style={l.name}>{d.name}</Text><Text style={l.detail}>{d.ingredients.filter(i => i.is_main).map(i => i.name).join(' · ')}</Text></View><RecipeTags recipe={d} /><Pressable accessibilityRole="button" accessibilityLabel={`移除${d.name}`} disabled={busy || !!draft.outgoing} style={l.iconButton} onPress={() => menu.setDraft(old => ({ ...old, rulePlan: old.rulePlan?.mode === 'chat' ? old.rulePlan : undefined, manualAdjustment: old.rulePlan?.mode === 'chat', requestKey: requestKey(), recipeIds: old.recipeIds.filter(id => id !== d.recipe_id), dishes: old.dishes.filter(i => i.recipe_id !== d.recipe_id) }))}><Ionicons name="remove-circle-outline" size={23} color={colors.muted} /></Pressable></View>)}
       </View>

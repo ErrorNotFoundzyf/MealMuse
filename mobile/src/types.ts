@@ -1,6 +1,12 @@
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter' | 'all_year';
 export const seasonNames: Record<Season, string> = { spring: '春季', summer: '夏季', autumn: '秋季', winter: '冬季', all_year: '全年' };
 export const ingredientCategories = { vegetable: '蔬菜', meat: '肉类', seafood: '水产', mushroom: '菌菇', egg: '蛋类', soy: '豆制品', staple: '谷物主食', seasoning: '调料', fruit: '水果', other: '其他' };
+export function mealItemSummary(dishes: { category_id: string }[]): string {
+  const dessert = dishes.filter(d => d.category_id === 'dessert').length;
+  const fruit = dishes.filter(d => d.category_id === 'fruit').length;
+  const ordinary = dishes.length - dessert - fruit;
+  return [`${ordinary}道菜`, ...(dessert ? [`${dessert}份甜点`] : []), ...(fruit ? [`${fruit}份水果`] : [])].join(' · ');
+}
 export type IngredientCategory = keyof typeof ingredientCategories;
 export type Ingredient = {
   id: string; name: string; ingredient_category: IngredientCategory | null; seasons: Season[];

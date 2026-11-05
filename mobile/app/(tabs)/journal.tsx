@@ -8,6 +8,7 @@ import { chinaToday, useMenu } from '../../src/menu-draft';
 import { LibraryPage, l } from '../../src/library-ui';
 import { Button, colors, Loading, Notice, s } from '../../src/ui';
 import type { MealRecord, TimeContext } from '../../src/types';
+import { mealItemSummary } from '../../src/types';
 
 export default function Journal() {
   const api = useApi(); const menu = useMenu();
@@ -48,7 +49,7 @@ export default function Journal() {
     </View>
     <View style={s.between}><Text style={s.section}>{Number(selected.slice(5, 7))}月{Number(selected.slice(8))}日</Text><Text style={l.detail}>{records.loading ? '读取中…' : `${onDay.length}份菜单`}</Text></View>
     {!!error && <Notice text={error} error />}
-    {records.error ? <Notice text={records.error} error onRetry={records.reload} /> : records.loading ? <Loading /> : !onDay.length ? <Notice text="这一天还没有记录。点击右上角「记录」，选好菜后确认即可。" /> : onDay.map(record => <View key={record.id} style={[s.card, { padding: 14, gap: 10 }]}><View style={s.between}><Text style={s.section}>{record.people_count}人 · {record.dishes.length}道菜</Text><Text style={l.status}>已确认</Text></View>{record.dishes.map(dish => <View key={dish.recipe_id} style={[s.between, { borderTopWidth: 1, borderColor: colors.line, paddingTop: 8 }]}><Text style={[s.body, { flex: 1 }]}>{dish.name}</Text><RecipeTags recipe={dish} /></View>)}<View style={s.between}><Pressable accessibilityRole="button" disabled={busy || !menu.ready} style={l.filterButton} onPress={() => begin(record)}><Text style={{ color: colors.green, fontSize: 14, fontWeight: '700' }}>查看与更正</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} style={l.filterButton} onPress={() => remove(record)}><Text style={{ color: colors.red, fontSize: 14 }}>删除记录</Text></Pressable></View></View>)}
+    {records.error ? <Notice text={records.error} error onRetry={records.reload} /> : records.loading ? <Loading /> : !onDay.length ? <Notice text="这一天还没有记录。点击右上角「记录」，选好菜后确认即可。" /> : onDay.map(record => <View key={record.id} style={[s.card, { padding: 14, gap: 10 }]}><View style={s.between}><Text style={s.section}>{record.people_count}人 · {mealItemSummary(record.dishes)}</Text><Text style={l.status}>已确认</Text></View>{record.dishes.map(dish => <View key={dish.recipe_id} style={[s.between, { borderTopWidth: 1, borderColor: colors.line, paddingTop: 8 }]}><Text style={[s.body, { flex: 1 }]}>{dish.name}</Text><RecipeTags recipe={dish} /></View>)}<View style={s.between}><Pressable accessibilityRole="button" disabled={busy || !menu.ready} style={l.filterButton} onPress={() => begin(record)}><Text style={{ color: colors.green, fontSize: 14, fontWeight: '700' }}>查看与更正</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} style={l.filterButton} onPress={() => remove(record)}><Text style={{ color: colors.red, fontSize: 14 }}>删除记录</Text></Pressable></View></View>)}
   </ScrollView></LibraryPage>;
 }
 const j = StyleSheet.create({ grid: { flexDirection: 'row', flexWrap: 'wrap' }, cell: { width: '14.2857%', minHeight: 44, alignItems: 'center', justifyContent: 'center' }, day: { minWidth: 36, minHeight: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }, dot: { width: 4, height: 4, borderRadius: 2, position: 'absolute', bottom: 3 } });
