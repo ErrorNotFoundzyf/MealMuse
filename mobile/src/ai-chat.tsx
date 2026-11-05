@@ -24,7 +24,7 @@ export function useAiChat(planning: PlanningSettings) {
     const key = pending.current!.key;
     setBusy(true); setError('');
     try {
-      const plan = await api.request<RulePlan>('/ai/chat', { method: 'POST', body: JSON.stringify({ ...body, request_key: key }) }, 50000);
+      const plan = await api.request<RulePlan>('/ai/chat', { method: 'POST', body: JSON.stringify({ ...body, request_key: key }) }, 95000);
       if (latest.current.requestKey !== before.requestKey) { setError('选菜已变化，对话结果未覆盖当前菜单'); return; }
       menu.setDraft(old => old.requestKey !== before.requestKey ? old : { people: plan.people_count, mealDate: plan.as_of_date,
         recipeIds: plan.dishes.map(d => d.recipe_id), dishes: plan.dishes, rulePlan: plan, requestKey: requestKey(),

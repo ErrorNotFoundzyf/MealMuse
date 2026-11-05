@@ -429,10 +429,21 @@ def register_ai_routes(api, session_factory, app):
         memory["messages"] = messages[-20:]
         memory["pending"] = pending
         memory["constraints"] = memory.get("constraints", [])
+        before_model = deepcopy(memory)
         try:
             dishes, reply, blocked, people, counts = run_turn(client, session_factory, plan_id, original, memory, pending, people, counts, allow, rejected_ids, rejected_sigs, data.settings_change)
         except DomainError as exc:
-            dishes, blocked, reply = original, True, exc.message
+            if exc.code in {"AI_NETWORK", "AI_BUDGET"}:
+                from .rule_fallback import RuleFallback
+                memory = before_model
+                try:
+                    dishes, reply, blocked, people, counts = run_turn(RuleFallback(memory, data.settings_change), session_factory, plan_id, original, memory, pending, people, counts, allow, rejected_ids, rejected_sigs, data.settings_change)
+                    reply = "模型暂不可用，已切换规则模式。" + reply
+                    memory["last_action"] = "rule_fallback"
+                except DomainError as fallback_error:
+                    dishes, blocked, reply = original, True, "模型暂不可用，规则模式未能完成：" + fallback_error.message
+            else:
+                dishes, blocked, reply = original, True, exc.message
             people, counts = memory.get("people_count", people), memory.get("category_counts", counts)
         memory["blocked"] = blocked
         memory["last_usage"] = getattr(client, "usage", {})

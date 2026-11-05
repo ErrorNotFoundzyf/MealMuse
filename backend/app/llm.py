@@ -4,9 +4,14 @@ import os
 from pathlib import Path
 from time import monotonic
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request, ProxyHandler, build_opener, urlopen as system_urlopen
 
 from .errors import DomainError
+
+
+def urlopen(request, timeout):
+    # The Windows system proxy may fail TLS for this provider while direct works.
+    return build_opener(ProxyHandler({})).open(request, timeout=timeout)
 
 
 def config():
@@ -35,7 +40,7 @@ class JsonClient:
         self.settings = config()
         if not self.settings["api_key"]:
             raise DomainError(503, "AI_NOT_CONFIGURED", "请先在后端本地配置 DeepSeek 密钥")
-        self.deadline = monotonic() + 42
+        self.deadline = monotonic() + 85
         self.calls = 0
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0, "requests": 0}
 
@@ -52,7 +57,15 @@ class JsonClient:
             request = Request(self.settings["base_url"].rstrip("/") + "/chat/completions", data=json.dumps(body).encode(),
                               headers={"Content-Type": "application/json", "Authorization": "Bearer " + self.settings["api_key"]})
             try:
-                with urlopen(request, timeout=min(18, self.deadline - monotonic())) as response:
+                try:
+                    response = urlopen(request, timeout=min(38, self.deadline - monotonic()))
+                except HTTPError:
+                    raise
+                except (URLError, TimeoutError, OSError):
+                    if self.deadline - monotonic() < 2:
+                        raise
+                    response = system_urlopen(request, timeout=min(8, self.deadline - monotonic()))
+                with response:
                     raw = response.read(2_000_001)
                 if len(raw) > 2_000_000:
                     raise ValueError()

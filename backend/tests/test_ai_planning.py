@@ -75,14 +75,33 @@ def test_model_failure_keeps_menu_and_unresolved_text_then_retry(env):
     client,fake=env
     first=chat(client).json()
     fake.failure=True
-    failed=chat(client,first,'不能吃牛肉').json()
+    failed=chat(client,first,'不能吃牛肉，还想适合老人').json()
     assert failed['dishes']==first['dishes'] and failed['ai']['blocked']
-    assert failed['ai']['pending']==['不能吃牛肉']
+    assert failed['ai']['pending']==['不能吃牛肉，还想适合老人']
     assert confirm(client,failed).status_code==409
     fake.failure=False
     restored=chat(client,failed,message='',retry=True).json()
     assert not restored['ai']['blocked'] and not restored['ai']['pending']
     assert any(c['ingredient_id']=='i_beef' for c in restored['ai']['constraints'])
+
+
+def test_network_failure_degrades_to_rule_dialogue_and_keeps_ingredient_exclusion(env):
+    client,fake=env
+    fake.failure=True
+    plan=chat(client,message='不吃牛肉').json()
+    assert not plan['ai']['blocked'] and len(plan['dishes'])==4
+    assert any(c['ingredient_id']=='i_beef' for c in plan['ai']['constraints'])
+    assert all(i['ingredient_id']!='i_beef' for d in plan['dishes'] for i in d['ingredients'])
+    assert '规则模式' in plan['ai']['messages'][-1]['content']
+
+
+def test_network_failure_does_not_guess_complex_preference(env):
+    client,fake=env
+    first=chat(client).json()
+    fake.failure=True
+    result=chat(client,first,message='换成适合老人的清淡菜').json()
+    assert result['ai']['blocked'] and result['dishes']==first['dishes']
+    assert '复杂要求' in result['ai']['messages'][-1]['content']
 
 def test_temporary_dishes_confirm_without_polluting_recipe_library(env):
     client,fake=env
@@ -176,6 +195,10 @@ def test_settings_change_automatically_regenerates_with_existing_constraints(env
 def test_settings_change_failure_preserves_menu_and_pending_request(env):
     client,fake=env
     first=chat(client,message='不要牛肉').json()
+    with Session(client.app.state.engine) as session:
+        for recipe in session.query(Recipe).all():
+            recipe.is_hidden=True
+        session.commit()
     fake.failure=True
     failed=chat(client,first,message='按新配置重新搭配',category_counts={'meat':1,'vegetable':1,'soup':1},settings_change=True).json()
     assert failed['ai']['blocked'] and failed['dishes']==first['dishes']

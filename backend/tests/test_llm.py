@@ -36,6 +36,14 @@ def test_blank_json_repaired_with_budget(configured, monkeypatch):
     assert requests[0]['response_format'] == {'type': 'json_object'}
 
 
+def test_direct_connection_failure_uses_system_proxy(configured, monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise TimeoutError('direct unavailable')
+    monkeypatch.setattr(llm, 'urlopen', fail)
+    monkeypatch.setattr(llm, 'system_urlopen', lambda *_args, **_kwargs: reply('{"ok":true}'))
+    assert llm.JsonClient().ask(Result, 'json', {}).ok
+
+
 def test_invalid_schema_and_truncation_fail_closed(configured, monkeypatch):
     monkeypatch.setattr(llm, 'urlopen', lambda *_args, **_kwargs: reply('{"bad":true}', 'length'))
     with pytest.raises(DomainError) as error:
@@ -57,6 +65,7 @@ def test_missing_key_and_network_failure(monkeypatch, configured):
     def timeout(*_args, **_kwargs):
         raise TimeoutError('secret should never appear')
     monkeypatch.setattr(llm, 'urlopen', timeout)
+    monkeypatch.setattr(llm, 'system_urlopen', timeout)
     with pytest.raises(DomainError) as error:
         llm.JsonClient().ask(Result, 'json', {})
     assert error.value.code == 'AI_NETWORK' and 'secret' not in error.value.message
