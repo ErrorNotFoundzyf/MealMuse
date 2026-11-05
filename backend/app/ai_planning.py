@@ -288,6 +288,11 @@ def change_cached_plan(session, plan, data, regenerate):
 
 
 def run_turn(client, session_factory, plan_id, original_dishes, memory, pending, people, counts, allow, rejected_ids, rejected_sigs, settings_change=False):
+    # Repeating the same unresolved request is a retry, not a second addition.
+    pending = list(dict.fromkeys(pending))
+    previous_constraints = deepcopy(memory.get('constraints', []))
+    previous_preferences = deepcopy(memory.get('preferences', []))
+    previous_context_verified = (not previous_constraints and not previous_preferences) or memory.get('pool_context') == pool_context(people, counts, allow, memory)
     with session_factory() as session:
         catalog = get_catalog(session)
     intent = client.ask(Intent, INTENT_PROMPT, {"current_dishes": [{"recipe_id": d["recipe_id"], "name": d["name"], "category_id": d["category_id"], "is_hearty": bool(is_hearty(d))} for d in original_dishes], "people_count": people, "category_counts": counts, "hearty_count": memory.get("hearty_count"),
@@ -417,6 +422,10 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
     if len(set(selection.eligible_ids)) != len(selection.eligible_ids) or not set(selection.eligible_ids) <= lookup.keys():
         raise DomainError(502, "AI_INVALID_POOL", "模型备选包含未知或重复菜谱，请重试")
     approved = {i: lookup[i] for i in selection.eligible_ids}
+    # Models may omit frozen dishes from eligible_ids when only adding a dessert.
+    # Keep them only if this turn introduced no new dietary constraints or preferences.
+    if intent.action == 'add' and previous_context_verified and memory['constraints'] == previous_constraints and memory['preferences'] == previous_preferences:
+        approved.update({d['recipe_id']: d for d in keep})
     if any(d["recipe_id"] not in approved for d in keep):
         return original_dishes, "保留的菜可能不符合新要求，请明确是否允许一起替换。", True, people, counts
     if any(conflicts(d, memory["constraints"]) for d in approved.values()):

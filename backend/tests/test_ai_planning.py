@@ -87,6 +87,43 @@ def test_missing_extra_keeps_existing_menu_and_explains_shortage(env):
     assert '甜点菜谱不足' in failed['ai']['messages'][-1]['content']
 
 
+def test_add_dessert_accepts_model_pool_containing_only_new_choices(env):
+    client, fake = env
+    dessert = client.post('/api/v1/recipes', json={'name': '甜点测试', 'category_id': 'dessert', 'ingredients': [{'ingredient_id': 'i_egg'}]}).json()
+    first = chat(client, category_counts={'meat': 1, 'vegetable': 1}).json()
+    fake.intent = {'action': 'add', 'extra_add': {'dessert': 1}, 'reply': '加甜点'}
+    fake.select = lambda c: {'eligible_ids': [dessert['id']], 'choices': [{'slot': 0, 'candidate_id': dessert['id'], 'suitability': 'match', 'reason': '甜点'}], 'reply': '加好甜点'}
+    added = chat(client, first, '加一个甜点', category_counts={'meat': 1, 'vegetable': 1}).json()
+    assert not added['ai']['blocked']
+    assert added['dishes'][:2] == first['dishes'] and added['dishes'][-1]['recipe_id'] == dessert['id']
+    assert confirm(client, added).status_code == 201
+
+
+def test_add_does_not_skip_model_check_when_new_preference_changes(env):
+    client, fake = env
+    dessert = client.post('/api/v1/recipes', json={'name': '甜点测试', 'category_id': 'dessert', 'ingredients': [{'ingredient_id': 'i_egg'}]}).json()
+    first = chat(client, category_counts={'meat': 1}).json()
+    fake.intent = {'action': 'add', 'extra_add': {'dessert': 1}, 'preferences': ['清淡'], 'reply': '加甜点'}
+    fake.select = lambda c: {'eligible_ids': [dessert['id']], 'choices': [{'slot': 0, 'candidate_id': dessert['id'], 'suitability': 'match', 'reason': '甜点'}], 'reply': '加好甜点'}
+    blocked = chat(client, first, '加一个甜点，整桌清淡一点', category_counts={'meat': 1}).json()
+    assert blocked['ai']['blocked'] and blocked['dishes'] == first['dishes']
+
+
+def test_repeating_unfinished_dessert_request_adds_only_one(env):
+    client, fake = env
+    dessert = client.post('/api/v1/recipes', json={'name': '甜点测试', 'category_id': 'dessert', 'ingredients': [{'ingredient_id': 'i_egg'}]}).json()
+    first = chat(client, category_counts={'meat': 1}).json()
+    fake.intent = {'action': 'add', 'extra_add': {'dessert': 1}, 'reply': '加甜点'}
+    fake.select = lambda c: {'eligible_ids': [], 'choices': [], 'reply': '未完成'}
+    failed = chat(client, first, '加一个甜点', category_counts={'meat': 1}).json()
+    assert failed['ai']['blocked']
+    fake.select = lambda c: {'eligible_ids': [dessert['id']], 'choices': [{'slot': 0, 'candidate_id': dessert['id'], 'suitability': 'match', 'reason': '甜点'}], 'reply': '加好甜点'}
+    result = chat(client, failed, '加一个甜点', category_counts={'meat': 1}).json()
+    assert not result['ai']['blocked'] and len(result['dishes']) == 2
+    assert sum(d['category_id'] == 'dessert' for d in result['dishes']) == 1
+    assert fake.calls[-2][1]['pending_user_messages'] == ['加一个甜点']
+
+
 def test_replace_vegetable_with_dessert_changes_only_current_menu(env):
     client, fake = env
     dessert = client.post('/api/v1/recipes', json={'name': '甜点测试', 'category_id': 'dessert', 'ingredients': [{'ingredient_id': 'i_egg'}]}).json()
