@@ -41,7 +41,7 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
   const editingCounts = counts ?? effectiveCounts;
   const total = Object.values(editingCounts).reduce((a, b) => a + b, 0);
   const chat = useAiChat(effective);
-  const busy = ruleBusy || chat.busy;
+  const busy = ruleBusy || chat.busy || chat.outgoing?.status === 'sending';
   const displayDishes = menu.draft.dishes;
   const maxNameLines = Math.max(1, ...displayDishes.map(d => nameLines[d.recipe_id] || 1));
   const dishCardHeight = 102 + (maxNameLines - 1) * 19 * fontScale + Math.max(0, fontScale - 1) * 60 + (displayDishes.some(d => d.source === 'ai_temporary') ? 64 : 0) + (displayDishes.some(d => d.season_warnings?.length) ? 34 : 0);
@@ -89,15 +89,15 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
     else void perform('new');
   }
   const folded = collapsed || keyboardShown;
-  const disableSwap = busy || !!plan?.confirmed_record_id || !!plan?.ai?.blocked || !!menu.draft.manualAdjustment;
+  const disableSwap = busy || !!chat.outgoing || !!plan?.confirmed_record_id || !!plan?.ai?.blocked || !!menu.draft.manualAdjustment;
   function resetConversation() { Keyboard.dismiss(); setClearOpen(true); }
   function clearCurrentMeal() {
     if (busy) return;
-    menu.setDraft(old => ({ ...old, people: effectivePeople, planning: { ...effective, category_counts: { ...effectiveCounts } }, rulePlan: undefined, manualAdjustment: false, recipeIds: [], dishes: [], recordId: undefined, revision: undefined, requestKey: requestKey() }));
+    menu.setDraft(old => ({ ...old, people: effectivePeople, planning: { ...effective, category_counts: { ...effectiveCounts } }, rulePlan: undefined, manualAdjustment: false, outgoing: undefined, recipeIds: [], dishes: [], recordId: undefined, revision: undefined, requestKey: requestKey() }));
     chat.reset(); pending.current = null; setInfo(''); setError(''); setCollapsed(false); setNameLines({}); setClearOpen(false);
   }
   return <View style={{ flex: 1, gap: 6 }}>
-    <View style={s.between}><Text style={[l.detail, { flex: 1 }]}>本次 {effectivePeople}人 · {effectiveCounts.meat || 0}荤 {effectiveCounts.vegetable || 0}素 {effectiveCounts.soup || 0}汤</Text><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy} onPress={openSettings} style={{ minHeight: 36, paddingHorizontal: 10, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>人数与菜数</Text></Pressable></View>
+    <View style={s.between}><Text style={[l.detail, { flex: 1 }]}>本次 {effectivePeople}人 · {effectiveCounts.meat || 0}荤 {effectiveCounts.vegetable || 0}素 {effectiveCounts.soup || 0}汤</Text><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy || !!chat.outgoing} onPress={openSettings} style={{ minHeight: 36, paddingHorizontal: 10, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: busy || chat.outgoing ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>人数与菜数</Text></Pressable></View>
     {plan && !!displayDishes.length && <View style={[s.card, { paddingHorizontal: 10, paddingVertical: 4, gap: 0, borderRadius: 16 }]}>
       <View style={s.between}><Text style={[s.section, { fontSize: 16 }]}>本餐菜单</Text><Text numberOfLines={1} style={{ flex: 1, color: colors.muted, fontSize: 10, lineHeight: 14, textAlign: 'left' }}>{displayDishes.length > 3 && !folded ? '左右滑动查看菜品' : ''}</Text><Pressable accessibilityRole="button" accessibilityLabel="清空本餐菜单与对话" disabled={busy} style={[l.iconButton, { opacity: busy ? 0.4 : 1 }]} onPress={resetConversation}><View style={{ borderWidth: 1, borderColor: '#C9D1C3', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}><Text style={{ color: colors.muted, fontSize: 13 }}>清空</Text></View></Pressable><Pressable accessibilityRole="button" accessibilityLabel={folded ? '展开本餐菜单' : '收起本餐菜单'} style={l.iconButton} onPress={() => { if (keyboardShown) Keyboard.dismiss(); setCollapsed(!folded); }}><Ionicons name={folded ? 'chevron-down' : 'chevron-up'} size={18} color={colors.green} /></Pressable></View>
       {!folded && <>
@@ -106,28 +106,28 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
             <Text numberOfLines={2} onTextLayout={event => { const lines = Math.min(2, Math.max(1, event.nativeEvent.lines.length)); setNameLines(old => old[dish.recipe_id] === lines ? old : { ...old, [dish.recipe_id]: lines }); }} style={{ fontSize: 14, fontWeight: '600', color: colors.ink, lineHeight: 19 }}>{dish.name}</Text>
             <View style={{ marginTop: 4 }}><RecipeTags recipe={dish} small /></View>
             {!!dish.season_warnings?.length && <Text numberOfLines={2} style={{ color: colors.accent, fontSize: 10, lineHeight: 14 }}>{dish.season_warnings.join('、')}</Text>}
-            {dish.source === 'ai_temporary' && <><Text style={{ color: colors.accent, fontSize: 10, lineHeight: 14 }}>AI 临时菜</Text><Pressable accessibilityRole="button" accessibilityLabel={`将${dish.name}保存到菜谱库`} disabled={busy} style={{ minHeight: 32, justifyContent: 'center' }} onPress={() => chat.requestSave(dish.recipe_id)}><Text style={{ color: colors.green, fontSize: 11 }}>存入菜谱</Text></Pressable></>}
+            {dish.source === 'ai_temporary' && <><Text style={{ color: colors.accent, fontSize: 10, lineHeight: 14 }}>AI 临时菜</Text><Pressable accessibilityRole="button" accessibilityLabel={`将${dish.name}保存到菜谱库`} disabled={busy || !!chat.outgoing} style={{ minHeight: 32, justifyContent: 'center' }} onPress={() => chat.requestSave(dish.recipe_id)}><Text style={{ color: colors.green, fontSize: 11 }}>存入菜谱</Text></Pressable></>}
             <View style={{ flex: 1 }} />
             <Pressable accessibilityRole="button" accessibilityLabel={`换掉${dish.name}`} hitSlop={{ top: 6, bottom: 6 }} disabled={disableSwap} style={{ minHeight: 32, borderTopWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', opacity: disableSwap ? 0.4 : 1 }} onPress={() => perform('replace', dish.recipe_id)}><Text style={{ color: colors.green, fontSize: 12 }}>换一道</Text></Pressable>
           </View>)}
         </ScrollView>
-        <View style={[s.row, { paddingVertical: 6 }]}><Pressable accessibilityRole="button" accessibilityLabel="从本轮备选换整桌菜单" hitSlop={{ top: 4, bottom: 4 }} disabled={disableSwap} onPress={() => perform('regenerate')} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: disableSwap ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>换整桌</Text></Pressable><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy} onPress={onManual} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>自己调整</Text></Pressable><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy || !!plan.confirmed_record_id || !!plan.ai?.blocked} onPress={() => router.push('/menu')} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.green, alignItems: 'center', justifyContent: 'center', opacity: busy || plan.confirmed_record_id || plan.ai?.blocked ? 0.4 : 1 }}><Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>确认菜单</Text></Pressable></View>
+        <View style={[s.row, { paddingVertical: 6 }]}><Pressable accessibilityRole="button" accessibilityLabel="从本轮备选换整桌菜单" hitSlop={{ top: 4, bottom: 4 }} disabled={disableSwap} onPress={() => perform('regenerate')} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: disableSwap ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>换整桌</Text></Pressable><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy} onPress={onManual} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>自己调整</Text></Pressable><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy || !!chat.outgoing || !!plan.confirmed_record_id || !!plan.ai?.blocked} onPress={() => router.push('/menu')} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.green, alignItems: 'center', justifyContent: 'center', opacity: busy || chat.outgoing || plan.confirmed_record_id || plan.ai?.blocked ? 0.4 : 1 }}><Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>确认菜单</Text></Pressable></View>
       </>}
     </View>}
     {plan?.ai?.hearty_count != null && <Text style={l.detail}>本餐要求：{plan.ai.hearty_count}道硬菜（按菜谱标签）</Text>}
-    <ScrollView ref={conversationScroll} style={{ flex: 1 }} contentContainerStyle={{ gap: 10, paddingTop: 4, paddingBottom: 10 }} keyboardShouldPersistTaps="handled" onContentSizeChange={() => { if (plan?.ai?.messages?.length) conversationScroll.current?.scrollToEnd({ animated: true }); }}>
+    <ScrollView ref={conversationScroll} style={{ flex: 1 }} contentContainerStyle={{ gap: 10, paddingTop: 4, paddingBottom: 10 }} keyboardShouldPersistTaps="handled" onContentSizeChange={() => { if (plan?.ai?.messages?.length || chat.outgoing) conversationScroll.current?.scrollToEnd({ animated: true }); }}>
       {!!chat.error && <Notice text={chat.error} error />}
       {chat.status.error && <Notice text={chat.status.error} error onRetry={chat.status.reload} />}
       {!!error && <Notice text={error} error />}
       {!!info && <Text accessibilityLiveRegion="polite" style={[l.detail, { color: colors.green }]}>{info}</Text>}
       {!!menu.draft.manualAdjustment && <Text style={l.detail}>选菜或配置已调整，请发送要求更新本餐备选后再用按钮换菜。</Text>}
-      <ChatMessages plan={plan} />
+      <ChatMessages plan={plan} outgoing={chat.outgoing} onRetry={chat.retryOutgoing} onEdit={chat.editOutgoing} />
       {!!plan?.ai?.blocked && <Notice text="本轮要求尚未完成，请继续说明或重试。当前菜单暂不能确认。" />}
       {profile.error && <Notice text={profile.error} error onRetry={profile.reload} />}
       {!complete && !profile.loading && <Notice text="请先设置家庭默认，或点击「人数与菜数」设置本次配置。" />}
-      {!plan && <><Text style={l.detail}>{chat.status.data?.configured ? '直接描述想吃什么，AI 会按要求筛选并搭配。也可按本次配置快速搭配。' : 'AI 正在等待后端配置，可先按本次配置搭配，或自己挑菜。'}</Text><Button label={complete ? '按本次配置快速搭配' : '设置本次搭配'} busy={busy} disabled={profile.loading} onPress={generate} /></>}
+      {!plan && <><Text style={l.detail}>{chat.status.data?.configured ? '直接描述想吃什么，AI 会按要求筛选并搭配。也可按本次配置快速搭配。' : 'AI 正在等待后端配置，可先按本次配置搭配，或自己挑菜。'}</Text><Button label={complete ? '按本次配置快速搭配' : '设置本次搭配'} busy={busy} disabled={profile.loading || !!chat.outgoing} onPress={generate} /></>}
       {plan?.mode === 'chat' && !displayDishes.length && <Text style={l.detail}>请在下方发送本餐要求，重新筛选并搭配菜单。</Text>}
-      {!!plan?.ai?.pending?.length && <Button label="重试未完成的要求" secondary busy={chat.busy} disabled={ruleBusy} onPress={() => chat.send('', true)} />}
+      {!!plan?.ai?.pending?.length && !chat.outgoing && <Button label="重试未完成的要求" secondary busy={chat.busy} disabled={ruleBusy} onPress={() => chat.send('', true)} />}
       {plan?.mode === 'chat' && !displayDishes.length && <Pressable accessibilityRole="button" disabled={busy} style={l.filterButton} onPress={resetConversation}><Text style={l.detail}>清空本餐</Text></Pressable>}
     </ScrollView>
     <View style={{ paddingVertical: 6 }}><ChatComposer chat={chat} disabled={ruleBusy} /></View>

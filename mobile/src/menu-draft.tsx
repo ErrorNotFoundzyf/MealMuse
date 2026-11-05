@@ -5,7 +5,8 @@ import type { MealDish, MealRecord, PlanningSettings, Profile, RulePlan } from '
 
 export const chinaToday = () => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
 export const requestKey = () => `menu-${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-type Draft = { recipeIds: string[]; people: number; mealDate: string; requestKey: string; recordId?: string; revision?: number; dishes: MealDish[]; rulePlan?: RulePlan; planning?: PlanningSettings; manualAdjustment?: boolean };
+export type OutgoingChat = { message: string; requestKey: string; body: Record<string, unknown>; status: 'sending' | 'failed'; error?: string };
+type Draft = { recipeIds: string[]; people: number; mealDate: string; requestKey: string; recordId?: string; revision?: number; dishes: MealDish[]; rulePlan?: RulePlan; planning?: PlanningSettings; manualAdjustment?: boolean; outgoing?: OutgoingChat };
 const empty = (people = 4, mealDate = chinaToday()): Draft => ({ recipeIds: [], people, mealDate, requestKey: requestKey(), dishes: [] });
 type MenuContextValue = { draft: Draft; ready: boolean; error: string; setDraft: React.Dispatch<React.SetStateAction<Draft>>; start: (date?: string, record?: MealRecord) => void; resetIfKey: (key: string) => void };
 const MenuContext = createContext<MenuContextValue | null>(null);
@@ -35,7 +36,9 @@ export function MenuProvider({ children }: React.PropsWithChildren) {
       if (stored) {
         try {
           const parsed = JSON.parse(stored) as Draft;
-          if (Array.isArray(parsed.recipeIds) && parsed.recipeIds.every(id => typeof id === 'string') && parsed.recipeIds.length <= 20 && typeof parsed.requestKey === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.mealDate) && Number.isInteger(parsed.people) && parsed.people >= 1 && parsed.people <= 30 && Array.isArray(parsed.dishes)) next = parsed;
+          if (Array.isArray(parsed.recipeIds) && parsed.recipeIds.every(id => typeof id === 'string') && parsed.recipeIds.length <= 20 && typeof parsed.requestKey === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.mealDate) && Number.isInteger(parsed.people) && parsed.people >= 1 && parsed.people <= 30 && Array.isArray(parsed.dishes)) {
+            next = parsed.outgoing?.status === 'sending' ? { ...parsed, outgoing: { ...parsed.outgoing, status: 'failed', error: '上次请求未完成，请重试确认结果。' } } : parsed;
+          }
         } catch { /* An invalid local draft does not affect confirmed records. */ }
       }
       setDraft(next); setLoadedKey(key);
