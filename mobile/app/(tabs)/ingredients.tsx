@@ -6,7 +6,17 @@ import { TagBadge } from '../../src/tags';
 import { useResource } from '../../src/api';
 import { Button, Chip, colors, Loading, Notice, s } from '../../src/ui';
 import { CategoryTabs, FilterButton, FilterSheet, LibraryPage, SearchBox, l } from '../../src/library-ui';
-import { Ingredient, ingredientCategories, Page as PageResult, seasonNames, TimeContext } from '../../src/types';
+import { Ingredient, IngredientCategory, ingredientCategories, Page as PageResult, seasonNames, TimeContext } from '../../src/types';
+
+const categoryIcons: Record<Exclude<IngredientCategory, 'mushroom'>, React.ComponentProps<typeof Ionicons>['name']> = {
+  vegetable: 'leaf-outline', meat: 'restaurant-outline', seafood: 'fish-outline', egg: 'egg-outline',
+  soy: 'cube-outline', staple: 'pizza-outline', seasoning: 'flask-outline', fruit: 'nutrition-outline', other: 'ellipsis-horizontal-outline',
+};
+
+function IngredientIcon({ category }: { category: IngredientCategory | null }) {
+  if (category === 'mushroom') return <View accessible={false} style={{ width: 23, height: 23, alignItems: 'center', justifyContent: 'center' }}><View style={{ width: 21, height: 11, borderWidth: 1.7, borderColor: colors.green, borderTopLeftRadius: 11, borderTopRightRadius: 11, borderBottomLeftRadius: 4, borderBottomRightRadius: 4 }} /><View style={{ width: 7, height: 7, borderWidth: 1.7, borderTopWidth: 0, borderColor: colors.green, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 }} /></View>;
+  return <Ionicons name={categoryIcons[category || 'other']} size={23} color={colors.green} />;
+}
 
 export default function Ingredients() {
   const [search, setSearch] = useState('');
@@ -31,7 +41,7 @@ export default function Ingredients() {
     <FlatList style={{ flex: 1 }} data={result.loading || result.error ? [] : result.data?.items || []} keyExtractor={item => item.id} contentContainerStyle={l.list} keyboardShouldPersistTaps="handled" refreshing={result.loading} onRefresh={result.reload}
       ListEmptyComponent={result.error ? <Notice text={result.error} error onRetry={result.reload} /> : result.loading ? <Loading /> : <Notice text="没有符合条件的食材，可以换个筛选，或添加食材。" />}
       renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={`查看与编辑${item.name}`} onPress={() => router.push({ pathname: '/ingredient', params: { id: item.id } })} style={({ pressed }) => [l.card, { minHeight: 56, paddingHorizontal: 12, paddingVertical: 9, gap: 10, opacity: pressed ? 0.65 : 1 }]}>
-        <Ionicons name={item.ingredient_category === 'seafood' ? 'fish-outline' : item.ingredient_category === 'egg' ? 'egg-outline' : item.ingredient_category === 'seasoning' ? 'flask-outline' : item.ingredient_category === 'meat' ? 'restaurant-outline' : 'leaf-outline'} size={23} color={colors.green} />
+        <IngredientIcon category={item.ingredient_category} />
         <View style={{ flex: 1, gap: 2 }}><View style={[s.row, { gap: 6 }]}><Text style={[l.name, { fontSize: 16, lineHeight: 22 }]} numberOfLines={1}>{item.name}</Text></View><Text style={[l.detail, { fontSize: 12, lineHeight: 18 }]} numberOfLines={1}>{item.ingredient_category ? ingredientCategories[item.ingredient_category] : '未分类'} · {item.seasons.length ? item.seasons.map(k => seasonNames[k].replace('季', '')).join('、') : '季节未设置'}</Text></View>
         <TagBadge small tag={item.is_hidden ? 'hidden' : item.seasons.includes('all_year') ? 'all_year' : item.season_status} label={item.is_hidden ? '已隐藏' : item.seasons.includes('all_year') ? '全年' : item.season_status === 'in_season' ? '当季' : item.season_status === 'out_of_season' ? '非当季' : '待设置'} /><Ionicons name="chevron-forward" size={14} color={colors.muted} />
       </Pressable>}
