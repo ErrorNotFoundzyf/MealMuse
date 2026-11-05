@@ -7,6 +7,7 @@ import { requestKey, useMenu } from './menu-draft';
 import { FilterSheet, l } from './library-ui';
 import { Button, colors, Loading, Notice, s, Stepper } from './ui';
 import { ChatComposer, ChatMessages, useAiChat } from './ai-chat';
+import { RecipeTags } from './tags';
 import type { PlanningSettings, Profile, RulePlan } from './types';
 
 export function RulePanel({ onManual }: { onManual: () => void }) {
@@ -21,7 +22,8 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
   const plan = menu.draft.rulePlan;
   const [collapsed, setCollapsed] = useState(false);
   const [keyboardShown, setKeyboardShown] = useState(false);
-  const { height } = useWindowDimensions();
+  const { width, fontScale } = useWindowDimensions();
+  const dishCardWidth = Math.max(94, Math.min(120, (width - 72) / 3)) * Math.min(fontScale, 1.4);
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardShown(true));
     const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardShown(false));
@@ -38,6 +40,7 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
   const chat = useAiChat(effective);
   const busy = ruleBusy || chat.busy;
   const displayDishes = menu.draft.dishes;
+  const dishCardHeight = 124 + Math.max(0, fontScale - 1) * 80 + (displayDishes.some(d => d.source === 'ai_temporary') ? 50 : 0) + (displayDishes.some(d => d.season_warnings?.length) ? 28 : 0);
   const complete = !!profile.data?.profile || !!menu.draft.planning || !!plan;
   function openSettings() {
     setPeople(effective.people_count); setCounts({ ...effective.category_counts }); setAllow(effective.allow_nonseasonal); setSheet(true);
@@ -88,13 +91,17 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
   return <View style={{ flex: 1, gap: 6 }}>
     <View style={s.between}><Text style={[l.detail, { flex: 1 }]}>本次 {effectivePeople}人 · {effectiveCounts.meat || 0}荤 {effectiveCounts.vegetable || 0}素 {effectiveCounts.soup || 0}汤</Text><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy} onPress={openSettings} style={{ minHeight: 36, paddingHorizontal: 10, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>人数与菜数</Text></Pressable></View>
     {plan && !!displayDishes.length && <View style={[s.card, { paddingHorizontal: 10, paddingVertical: 4, gap: 0, borderRadius: 16 }]}>
-      <View style={s.between}><Text style={[s.section, { fontSize: 17 }]}>本餐菜单</Text><Text style={[l.detail, { flex: 1, textAlign: 'right' }]}>{menu.draft.people}人 · {displayDishes.length}道菜</Text><Pressable accessibilityRole="button" accessibilityLabel="更多本餐操作" disabled={busy} style={l.iconButton} onPress={showMore}><Ionicons name="ellipsis-horizontal" size={20} color={colors.green} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel={folded ? '展开本餐菜单' : '收起本餐菜单'} style={l.iconButton} onPress={() => { if (keyboardShown) Keyboard.dismiss(); setCollapsed(!folded); }}><Ionicons name={folded ? 'chevron-down' : 'chevron-up'} size={18} color={colors.green} /></Pressable></View>
+      <View style={s.between}><Text style={[s.section, { fontSize: 16 }]}>本餐菜单</Text><Text style={[l.detail, { flex: 1, textAlign: 'right', fontSize: 12 }]}>{menu.draft.people}人 · {displayDishes.length}道菜</Text><Pressable accessibilityRole="button" accessibilityLabel="更多本餐操作" disabled={busy} style={l.iconButton} onPress={showMore}><Ionicons name="ellipsis-horizontal" size={20} color={colors.green} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel={folded ? '展开本餐菜单' : '收起本餐菜单'} style={l.iconButton} onPress={() => { if (keyboardShown) Keyboard.dismiss(); setCollapsed(!folded); }}><Ionicons name={folded ? 'chevron-down' : 'chevron-up'} size={18} color={colors.green} /></Pressable></View>
       {!folded && <>
-        <ScrollView style={{ maxHeight: Math.min(height * 0.25, 185) }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-          {displayDishes.map(dish => <View key={dish.recipe_id} style={{ borderTopWidth: 1, borderColor: colors.line }}>
-            <View style={[s.between, { minHeight: 44 }]}><View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 6 }}><Text numberOfLines={1} style={{ fontSize: 15, fontWeight: '600', color: colors.ink, flexShrink: 1, lineHeight: 22 }}>{dish.name}</Text><Text style={{ color: colors.muted, fontSize: 12 }}>{dish.category_name}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={`换掉${dish.name}`} disabled={disableSwap} style={{ minHeight: 44, paddingHorizontal: 4, justifyContent: 'center', opacity: disableSwap ? 0.4 : 1 }} onPress={() => perform('replace', dish.recipe_id)}><Text style={{ color: colors.green, fontSize: 13 }}>换一道</Text></Pressable></View>
-            {!!dish.season_warnings?.length && <Text style={[l.detail, { color: colors.accent }]}>{dish.season_warnings.join('、')}</Text>}
-            {dish.source === 'ai_temporary' && <View style={s.between}><Text style={[l.detail, { fontSize: 12, color: colors.accent }]}>AI 临时菜 · 未入库</Text><Pressable accessibilityRole="button" disabled={busy} style={l.filterButton} onPress={() => chat.requestSave(dish.recipe_id)}><Text style={{ color: colors.green, fontSize: 13 }}>保存到菜谱库</Text></Pressable></View>}
+        {displayDishes.length > 3 && <Text style={{ color: colors.muted, fontSize: 10, lineHeight: 14, textAlign: 'right', paddingBottom: 3 }}>左右滑动查看菜品</Text>}
+        <ScrollView horizontal style={{ height: dishCardHeight, flexGrow: 0 }} showsHorizontalScrollIndicator={displayDishes.length > 3} keyboardShouldPersistTaps="handled" accessibilityLabel="本餐菜品，左右滑动查看" contentContainerStyle={{ gap: 8, paddingTop: 2, paddingBottom: 5, alignItems: 'stretch' }}>
+          {displayDishes.map(dish => <View key={dish.recipe_id} style={{ width: dishCardWidth, borderWidth: 1, borderColor: colors.line, borderRadius: 12, backgroundColor: '#FCFBF7', paddingHorizontal: 8, paddingTop: 8, gap: 5 }}>
+            <Text numberOfLines={2} style={{ fontSize: 14, fontWeight: '600', color: colors.ink, lineHeight: 19, minHeight: 38 }}>{dish.name}</Text>
+            <RecipeTags recipe={dish} small />
+            {!!dish.season_warnings?.length && <Text numberOfLines={2} style={{ color: colors.accent, fontSize: 10, lineHeight: 14 }}>{dish.season_warnings.join('、')}</Text>}
+            {dish.source === 'ai_temporary' && <><Text style={{ color: colors.accent, fontSize: 10, lineHeight: 14 }}>AI 临时菜</Text><Pressable accessibilityRole="button" accessibilityLabel={`将${dish.name}保存到菜谱库`} disabled={busy} style={{ minHeight: 32, justifyContent: 'center' }} onPress={() => chat.requestSave(dish.recipe_id)}><Text style={{ color: colors.green, fontSize: 11 }}>存入菜谱</Text></Pressable></>}
+            <View style={{ flex: 1 }} />
+            <Pressable accessibilityRole="button" accessibilityLabel={`换掉${dish.name}`} hitSlop={{ top: 6, bottom: 6 }} disabled={disableSwap} style={{ minHeight: 32, borderTopWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', opacity: disableSwap ? 0.4 : 1 }} onPress={() => perform('replace', dish.recipe_id)}><Text style={{ color: colors.green, fontSize: 12 }}>换一道</Text></Pressable>
           </View>)}
         </ScrollView>
         <View style={[s.row, { paddingVertical: 6 }]}><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy} onPress={onManual} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>自己调整</Text></Pressable><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy || !!plan.confirmed_record_id || !!plan.ai?.blocked} onPress={() => router.push('/menu')} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.green, alignItems: 'center', justifyContent: 'center', opacity: busy || plan.confirmed_record_id || plan.ai?.blocked ? 0.4 : 1 }}><Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>确认菜单</Text></Pressable></View>

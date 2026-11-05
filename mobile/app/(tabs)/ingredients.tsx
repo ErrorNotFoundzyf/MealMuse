@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { router } from 'expo-router';
 import { FlatList, Pressable, Switch, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { TagBadge } from '../../src/tags';
 import { useResource } from '../../src/api';
 import { Button, Chip, colors, Loading, Notice, s } from '../../src/ui';
 import { CategoryTabs, FilterButton, FilterSheet, LibraryPage, SearchBox, l } from '../../src/library-ui';
@@ -32,7 +33,7 @@ export default function Ingredients() {
       renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityLabel={`查看与编辑${item.name}`} onPress={() => router.push({ pathname: '/ingredient', params: { id: item.id } })} style={({ pressed }) => [l.card, { opacity: pressed ? 0.65 : 1 }]}>
         <Ionicons name={item.ingredient_category === 'seafood' ? 'fish-outline' : item.ingredient_category === 'egg' ? 'egg-outline' : item.ingredient_category === 'seasoning' ? 'flask-outline' : item.ingredient_category === 'meat' ? 'restaurant-outline' : 'leaf-outline'} size={27} color={colors.green} />
         <View style={{ flex: 1, gap: 3 }}><View style={[s.row, { gap: 6 }]}><Text style={l.name} numberOfLines={1}>{item.name}</Text></View><Text style={l.detail} numberOfLines={1}>{item.ingredient_category ? ingredientCategories[item.ingredient_category] : '未分类'} · {item.seasons.length ? item.seasons.map(k => seasonNames[k].replace('季', '')).join('、') : '季节未设置'}</Text></View>
-        <Text style={[l.status, (item.is_hidden || item.season_status !== 'in_season') && { color: colors.muted, backgroundColor: '#F1F0E9' }]}>{item.is_hidden ? '已隐藏' : item.seasons.includes('all_year') ? '全年' : item.season_status === 'in_season' ? '当季' : item.season_status === 'out_of_season' ? '非当季' : '待设置'}</Text><Ionicons name="chevron-forward" size={16} color={colors.muted} />
+        <TagBadge tag={item.is_hidden ? 'hidden' : item.seasons.includes('all_year') ? 'all_year' : item.season_status} label={item.is_hidden ? '已隐藏' : item.seasons.includes('all_year') ? '全年' : item.season_status === 'in_season' ? '当季' : item.season_status === 'out_of_season' ? '非当季' : '待设置'} /><Ionicons name="chevron-forward" size={16} color={colors.muted} />
       </Pressable>}
       ListFooterComponent={!result.loading && !result.error && (result.data?.total || 0) > 30 ? <View style={s.between}><Button label="上一页" secondary disabled={page === 0} onPress={() => setPage(v => v - 1)} /><Text style={s.caption}>第 {page + 1} 页</Text><Button label="下一页" secondary disabled={(page + 1) * 30 >= (result.data?.total || 0)} onPress={() => setPage(v => v + 1)} /></View> : undefined} />
     <FilterSheet visible={sheet} title="筛选食材" onClose={() => setSheet(false)} onReset={() => { setCategory(''); setSeason(''); setVisibility('visible'); setPage(0); }}>

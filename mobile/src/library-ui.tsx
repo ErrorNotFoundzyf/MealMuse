@@ -3,10 +3,11 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleShee
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { colors, s } from './ui';
-import { Category, recipeCategoryIds } from './types';
+import type { Category } from './types';
+import { RecipeTags } from './tags';
 
 export function RecipeBadges({ recipe, categories }: { recipe: { category_id: string; is_hearty?: boolean }; categories: Category[] }) {
-  return <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, maxWidth: 130 }}>{recipeCategoryIds(recipe).map(id => <Text key={id} style={l.status}>{categories.find(c => c.id === id)?.name || (id === 'hearty' ? '硬菜' : '未分类')}</Text>)}</View>;
+  return <RecipeTags recipe={recipe} categories={categories} />;
 }
 
 export function LibraryPage({ title, context, action, actionIcon = 'add', onAdd, children }: React.PropsWithChildren<{ title: string; context?: string; action?: string; actionIcon?: React.ComponentProps<typeof Ionicons>['name']; onAdd?: () => void }>) {
