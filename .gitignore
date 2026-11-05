@@ -26,3 +26,4 @@ mobile/ios/
 *.keystore
 *.apk
 backend/llm.local.json
+backend/auth.local.json

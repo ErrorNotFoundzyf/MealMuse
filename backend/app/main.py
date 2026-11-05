@@ -22,6 +22,7 @@ from .errors import DomainError
 from .meal_routes import register_meal_routes
 from .recommendations import register_recommendation_routes
 from .ai_planning import register_ai_routes
+from .family_auth import FamilyAuth, LoginInput
 
 
 def migrate(engine):
@@ -32,10 +33,11 @@ def migrate(engine):
         command.upgrade(config, "head")
 
 
-def create_app(database_url: str | None = None, api_token: str | None = None):
+def create_app(database_url: str | None = None, api_token: str | None = None, auth_config: dict | None = None):
     engine = make_engine(database_url or default_database_url())
     sessions = session_factory(engine)
     token = api_token if api_token is not None else os.getenv("EATING_API_TOKEN", "")
+    family_auth = FamilyAuth(auth_config) if auth_config is not None else FamilyAuth.load() if api_token is None else FamilyAuth()
 
     @asynccontextmanager
     async def lifespan(_):
@@ -85,7 +87,11 @@ def create_app(database_url: str | None = None, api_token: str | None = None):
                 raise
 
     def authorize(request: Request):
-        if token and not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {token}"):
+        header = request.headers.get("authorization", "")
+        if family_auth.config:
+            if not header.startswith('Bearer ') or not family_auth.verify(header[7:]):
+                raise DomainError(401, "UNAUTHORIZED", "请登录家庭账号")
+        elif token and not hmac.compare_digest(header, f"Bearer {token}"):
             raise DomainError(401, "UNAUTHORIZED", "家庭接入凭证不正确，请到设置中检查")
 
     api = APIRouter(prefix="/api/v1", dependencies=[Depends(authorize)])
@@ -93,6 +99,19 @@ def create_app(database_url: str | None = None, api_token: str | None = None):
     @app.get("/api/v1/health")
     def health():
         return {"status": "ok", "stage": "M3", "version": "0.4.0"}
+
+    @app.get('/api/v1/auth/status')
+    def auth_status():
+        return {'configured': bool(family_auth.config)}
+
+    @app.post('/api/v1/auth/login')
+    def login(data: LoginInput, request: Request, response: Response):
+        response.headers['Cache-Control'] = 'no-store'
+        return {'token': family_auth.login(data.username, data.password, request.client.host if request.client else 'unknown'), 'username': family_auth.config['username']}
+
+    @api.get('/auth/session')
+    def auth_session():
+        return {'username': family_auth.config['username'] if family_auth.config else None}
 
     @api.get("/time-context")
     def current_time():

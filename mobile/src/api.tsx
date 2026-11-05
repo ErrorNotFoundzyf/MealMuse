@@ -6,6 +6,8 @@ import type { Page } from './types';
 
 type Api = {
   ready: boolean; baseUrl: string; hasToken: boolean; revision: number;
+  authState: 'checking' | 'signedIn' | 'signedOut' | 'offline' | 'legacy'; username: string;
+  login: (username: string, password: string) => Promise<void>; logout: () => Promise<void>; retryAuth: () => void;
   saveConnection: (url: string, token: string, replaceToken?: boolean) => Promise<void>;
   request: <T>(path: string, options?: RequestInit, timeoutMs?: number) => Promise<T>;
   changed: () => void;
@@ -17,13 +19,56 @@ export function ApiProvider({ children }: React.PropsWithChildren) {
   const [ready, setReady] = useState(false);
   const [baseUrl, setBaseUrl] = useState(process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:8000');
   const [token, setToken] = useState('');
+  const [session, setSession] = useState(''); const [sessionUrl, setSessionUrl] = useState('');
+  const [authState, setAuthState] = useState<Api['authState']>('checking'); const [username, setUsername] = useState('');
+  const [authRetry, setAuthRetry] = useState(0);
   const [revision, setRevision] = useState(0);
   const changed = useCallback(() => setRevision(v => v + 1), []);
   useEffect(() => {
-    Promise.all([AsyncStorage.getItem('api-url'), SecureStore.getItemAsync('family-access-token')])
-      .then(([url, secret]) => { if (url) setBaseUrl(url); setToken(secret || ''); })
+    Promise.all([AsyncStorage.getItem('api-url'), SecureStore.getItemAsync('family-access-token'), SecureStore.getItemAsync('family-session'), SecureStore.getItemAsync('family-session-url')])
+      .then(([url, secret, savedSession, savedUrl]) => { if (url) setBaseUrl(url); setToken(secret || ''); setSession(savedSession || ''); setSessionUrl(savedUrl || ''); })
       .catch(() => { /* Connection can be re-entered if device storage is unavailable. */ })
       .finally(() => setReady(true));
+  }, []);
+  useEffect(() => {
+    if (!ready) return;
+    let active = true;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    setAuthState('checking');
+    (async () => {
+      const response = await fetch(`${baseUrl}/api/v1/auth/status`, { signal: controller.signal });
+      if (!response.ok) throw new Error('连接失败');
+      const state = await response.json();
+      if (!state.configured) { if (active) setAuthState('legacy'); return; }
+      if (!session || sessionUrl !== baseUrl) { if (active) setAuthState('signedOut'); return; }
+      const check = await fetch(`${baseUrl}/api/v1/auth/session`, { signal: controller.signal, headers: { Authorization: `Bearer ${session}` } });
+      if (check.status === 401) { if (active) setAuthState('signedOut'); return; }
+      if (!check.ok) throw new Error('连接失败');
+      const data = await check.json();
+      if (active) { setUsername(data.username || ''); setAuthState('signedIn'); }
+    })().catch(() => { if (active) setAuthState('offline'); }).finally(() => clearTimeout(timer));
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [ready, baseUrl, session, sessionUrl, authRetry]);
+  const retryAuth = useCallback(() => setAuthRetry(v => v + 1), []);
+  const login = useCallback(async (name: string, password: string) => {
+    if (!__DEV__ && !baseUrl.startsWith('https://')) throw new Error('正式版本需要使用 HTTPS 家庭服务地址');
+    const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 12000);
+    try {
+      const response = await fetch(`${baseUrl}/api/v1/auth/login`, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: name.trim(), password }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message || '登录失败，请重试');
+      await SecureStore.setItemAsync('family-session', data.token);
+      await SecureStore.setItemAsync('family-session-url', baseUrl);
+      setUsername(data.username); setSessionUrl(baseUrl); setSession(data.token); setAuthState('signedIn');
+    } catch (e) {
+      if (controller.signal.aborted || e instanceof TypeError) throw new Error('连接不到家庭服务，请检查网络和服务地址');
+      throw e;
+    } finally { clearTimeout(timer); }
+  }, [baseUrl]);
+  const logout = useCallback(async () => {
+    await SecureStore.deleteItemAsync('family-session'); await SecureStore.deleteItemAsync('family-session-url');
+    setSession(''); setSessionUrl(''); setUsername(''); setAuthState('signedOut');
   }, []);
   const saveConnection = useCallback(async (url: string, secret: string, replaceToken = false) => {
     const trimmed = url.trim().replace(/\/+$/, '');
@@ -45,11 +90,12 @@ export function ApiProvider({ children }: React.PropsWithChildren) {
     try {
       const response = await fetch(`${baseUrl}/api/v1${path}`, {
         ...options, signal: controller.signal,
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
+        headers: { 'Content-Type': 'application/json', ...((session && sessionUrl === baseUrl ? session : token) ? { Authorization: `Bearer ${session && sessionUrl === baseUrl ? session : token}` } : {}), ...options.headers },
       });
       if (response.status === 204) return undefined as T;
       const data = await response.json();
       if (!response.ok) {
+        if (response.status === 401 && session && sessionUrl === baseUrl) setAuthState('signedOut');
         const details = data.error?.details;
         const duplicate = details?.ingredient_id ? `（已有：${details.name}）` : '';
         const refs = details?.recipes?.map((r: { name: string }) => r.name).join('、');
@@ -62,8 +108,8 @@ export function ApiProvider({ children }: React.PropsWithChildren) {
       if (error instanceof TypeError) throw new Error('连接不到家庭服务，请到设置检查地址、网络和服务是否启动');
       throw error;
     } finally { clearTimeout(timeout); }
-  }, [baseUrl, token]);
-  const value = useMemo(() => ({ ready, baseUrl, hasToken: !!token, saveConnection, request, revision, changed }), [ready, baseUrl, token, saveConnection, request, revision, changed]);
+  }, [baseUrl, token, session, sessionUrl]);
+  const value = useMemo(() => ({ ready, baseUrl, hasToken: !!token, authState, username, login, logout, retryAuth, saveConnection, request, revision, changed }), [ready, baseUrl, token, authState, username, login, logout, retryAuth, saveConnection, request, revision, changed]);
   return <ApiContext.Provider value={value}>{children}</ApiContext.Provider>;
 }
 
