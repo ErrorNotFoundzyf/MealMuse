@@ -24,6 +24,7 @@ class ChatInput(GenerateInput):
     retry: StrictBool = False
     selected_recipe_ids: list[str] = Field(default_factory=list, max_length=20)
     replace_selection: StrictBool = False
+    settings_change: StrictBool = False
 
     @model_validator(mode="after")
     def consistent(self):
@@ -281,7 +282,7 @@ def change_cached_plan(session, plan, data, regenerate):
     return plan_data(session, plan)
 
 
-def run_turn(client, session_factory, plan_id, original_dishes, memory, pending, people, counts, allow, rejected_ids, rejected_sigs):
+def run_turn(client, session_factory, plan_id, original_dishes, memory, pending, people, counts, allow, rejected_ids, rejected_sigs, settings_change=False):
     with session_factory() as session:
         catalog = get_catalog(session)
     intent = client.ask(Intent, INTENT_PROMPT, {"current_dishes": [{"recipe_id": d["recipe_id"], "name": d["name"], "category_id": d["category_id"], "is_hearty": bool(is_hearty(d))} for d in original_dishes], "people_count": people, "category_counts": counts, "hearty_count": memory.get("hearty_count"),
@@ -290,16 +291,20 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
     memory["constraints"] = merge_constraints(memory, intent, pending, catalog)
     merge_hearty_requirement(memory, intent, pending)
     memory["preferences"] = list(dict.fromkeys([*memory.get("preferences", []), *[p[:200] for p in intent.preferences]]))[-20:]
-    people = intent.people_count or people
+    people = people if settings_change else intent.people_count or people
     text_request = "\n".join(pending)
     explicit_meal_counts = re.search(r"(?:\d+|[一二两三四五六七八九十])\s*(?:道|个|份)?\s*(?:荤菜|素菜|汤)|(?:总共|一共|共|只要|只做|只吃|只推荐).{0,12}(?:道菜|个菜)", text_request)
     # A hard-dish tag quota alone cannot overwrite the ordinary meal quotas.
-    if intent.category_counts is not None and ("硬菜" not in text_request or explicit_meal_counts):
+    if not settings_change and intent.category_counts is not None and ("硬菜" not in text_request or explicit_meal_counts):
         try:
             counts = GenerateInput(request_key="validation-only-key", category_counts=intent.category_counts).category_counts
         except ValueError:
             raise DomainError(502, "AI_INVALID_COUNTS", "模型未能可靠理解菜数，请明确荤菜、素菜和汤各几道") from None
     memory["people_count"], memory["category_counts"] = people, counts
+    if settings_change and intent.action != "clarify":
+        intent.action = "generate"
+        intent.keep_recipe_ids = []
+        intent.target_recipe_ids = []
     if memory.get("hearty_count", 0) > sum(counts.values()):
         return original_dishes, "想要的硬菜数量超过本次总菜数，请先说明是否调整荤素汤数量。", True, people, counts
     if (any(word in " ".join(pending) for word in ["过敏", "不能吃", "不吃"]) and not memory["constraints"]) or intent.action == "clarify":
@@ -425,7 +430,7 @@ def register_ai_routes(api, session_factory, app):
         memory["pending"] = pending
         memory["constraints"] = memory.get("constraints", [])
         try:
-            dishes, reply, blocked, people, counts = run_turn(client, session_factory, plan_id, original, memory, pending, people, counts, allow, rejected_ids, rejected_sigs)
+            dishes, reply, blocked, people, counts = run_turn(client, session_factory, plan_id, original, memory, pending, people, counts, allow, rejected_ids, rejected_sigs, data.settings_change)
         except DomainError as exc:
             dishes, blocked, reply = original, True, exc.message
             people, counts = memory.get("people_count", people), memory.get("category_counts", counts)

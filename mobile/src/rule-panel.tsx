@@ -53,8 +53,16 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
     if (total < 1 || total > 20) return;
     const planning = { people_count: editingPeople, category_counts: { ...editingCounts }, allow_nonseasonal: allow };
     const changed = planning.people_count !== effective.people_count || planning.allow_nonseasonal !== effective.allow_nonseasonal || ['meat', 'vegetable', 'soup'].some(id => (planning.category_counts[id] || 0) !== (effective.category_counts[id] || 0));
-    menu.setDraft(old => changed ? { ...old, planning, people: planning.people_count, rulePlan: old.rulePlan?.mode === 'chat' ? { ...old.rulePlan, ai: { ...old.rulePlan.ai!, blocked: true } } : undefined, manualAdjustment: old.rulePlan?.mode === 'chat', recipeIds: [], dishes: [], recordId: undefined, revision: undefined, requestKey: requestKey() } : { ...old, planning });
-    pending.current = null; setError(''); setInfo(changed ? '本次配置已更新，旧菜单已清空，请重新搭配。' : ''); setSheet(false);
+    pending.current = null; setError(''); setSheet(false);
+    const needsRecovery = !!menu.draft.rulePlan && !!menu.draft.rulePlan.ai?.blocked && !menu.draft.dishes.length;
+    if (!changed && !needsRecovery) return;
+    if (menu.draft.rulePlan) {
+      setInfo('');
+      void chat.send(`请按本次新配置重新搭配：${planning.people_count}人，${planning.category_counts.meat || 0}荤${planning.category_counts.vegetable || 0}素${planning.category_counts.soup || 0}汤，保留已有忌口和硬菜要求。`, false, planning);
+    } else {
+      menu.setDraft(old => ({ ...old, planning, people: planning.people_count, requestKey: requestKey() }));
+      setInfo('本次人数和菜数已更新。');
+    }
   }
   async function perform(action: 'new' | 'replace' | 'regenerate', recipeId?: string) {
     if (busy) return;
@@ -129,7 +137,7 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
       </View>
     </Modal>
     <FilterSheet visible={sheet} title="本次人数与菜数" onClose={() => setSheet(false)} onApply={applySettings} applyDisabled={total < 1 || total > 20 || profile.loading} resetLabel="家庭默认" onReset={() => { setPeople(profile.data?.profile?.people_count ?? menu.draft.people); setCounts({ ...(profile.data?.profile?.category_counts ?? { meat: 1, vegetable: 2, soup: 1 }) }); setAllow(false); }}>
-      {profile.loading ? <Loading /> : <><Stepper label="用餐人数" value={editingPeople} min={1} max={30} onChange={setPeople} />{[{ id: 'meat', name: '荤菜' }, { id: 'vegetable', name: '素菜' }, { id: 'soup', name: '汤' }].map(c => <Stepper key={c.id} label={c.name} value={editingCounts[c.id] || 0} onChange={v => setCounts({ ...editingCounts, [c.id]: v })} />)}<Text style={s.caption}>本次共 {total} 道菜（1—20道），不会更改家庭默认。修改后会清空旧菜单，需重新搭配。</Text><View style={s.between}><Text style={[s.body, { flex: 1 }]}>允许非当季及季节未设置食材</Text><Switch accessibilityLabel="允许非当季及季节未设置食材" value={allow} onValueChange={setAllow} trackColor={{ true: colors.green }} /></View><Text style={s.caption}>默认仅从当季与全年食材搭配。开启后仍严格排除最近三天的菜。</Text></>}
+      {profile.loading ? <Loading /> : <><Stepper label="用餐人数" value={editingPeople} min={1} max={30} onChange={setPeople} />{[{ id: 'meat', name: '荤菜' }, { id: 'vegetable', name: '素菜' }, { id: 'soup', name: '汤' }].map(c => <Stepper key={c.id} label={c.name} value={editingCounts[c.id] || 0} onChange={v => setCounts({ ...editingCounts, [c.id]: v })} />)}<Text style={s.caption}>本次共 {total} 道菜（1—20道），不会更改家庭默认。修改后会按新配置重新搭配，保留本餐要求。</Text><View style={s.between}><Text style={[s.body, { flex: 1 }]}>允许非当季及季节未设置食材</Text><Switch accessibilityLabel="允许非当季及季节未设置食材" value={allow} onValueChange={setAllow} trackColor={{ true: colors.green }} /></View><Text style={s.caption}>默认仅从当季与全年食材搭配。开启后仍严格排除最近三天的菜。</Text></>}
     </FilterSheet>
   </View>;
 }

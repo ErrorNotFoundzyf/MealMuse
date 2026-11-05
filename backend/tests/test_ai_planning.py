@@ -163,6 +163,33 @@ def test_manual_selection_and_config_change_preserve_hard_memory(env):
     assert second['ai']['constraints']==first['ai']['constraints']
 
 
+def test_settings_change_automatically_regenerates_with_existing_constraints(env):
+    client,fake=env
+    first=chat(client,message='不要牛肉').json()
+    fake.intent={'action':'replace','target_recipe_ids':[first['dishes'][0]['recipe_id']], 'people_count':7,'category_counts':{'meat':1},'reply':'调整'}
+    second=chat(client,first,message='请按新配置重新搭配',people_count=3,category_counts={'meat':1,'vegetable':1,'soup':1},settings_change=True).json()
+    assert not second['ai']['blocked'] and len(second['dishes'])==3
+    assert second['people_count']==3 and second['category_counts']=={'meat':1,'vegetable':1,'soup':1}
+    assert second['ai']['constraints']==first['ai']['constraints']
+
+
+def test_settings_change_failure_preserves_menu_and_pending_request(env):
+    client,fake=env
+    first=chat(client,message='不要牛肉').json()
+    fake.failure=True
+    failed=chat(client,first,message='按新配置重新搭配',category_counts={'meat':1,'vegetable':1,'soup':1},settings_change=True).json()
+    assert failed['ai']['blocked'] and failed['dishes']==first['dishes']
+    assert failed['ai']['constraints']==first['ai']['constraints'] and failed['ai']['pending']
+
+
+def test_settings_change_respects_unresolved_clarification(env):
+    client,fake=env
+    first=chat(client).json()
+    fake.intent={'action':'clarify','reply':'请说明本餐限制'}
+    result=chat(client,first,message='按新配置重新搭配',category_counts={'meat':1,'vegetable':1},settings_change=True).json()
+    assert result['ai']['blocked'] and result['dishes']==first['dishes']
+
+
 def swap(client, plan, regenerate=False, key=None):
     return client.post('/api/v1/recommendations/'+plan['id']+('/regenerate' if regenerate else '/replace'), json={
         'request_key': key or str(uuid4()), 'expected_revision': plan['revision'],

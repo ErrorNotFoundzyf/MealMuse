@@ -13,12 +13,12 @@ export function useAiChat(planning: PlanningSettings) {
   const [input, setInput] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const latest = useRef(menu.draft); latest.current = menu.draft;
   const pending = useRef<{ signature: string; key: string } | null>(null);
-  async function send(message = input, retry = false) {
+  async function send(message = input, retry = false, override?: PlanningSettings) {
     if (busy || (!message.trim() && !retry)) return;
     const before = menu.draft;
-    const body = { message: retry ? '' : message.trim(), retry, ...planning,
+    const body = { message: retry ? '' : message.trim(), retry, ...(override || planning), ...(override ? { settings_change: true } : {}),
       ...(before.rulePlan ? { plan_id: before.rulePlan.id, expected_revision: before.rulePlan.revision } : {}),
-      selected_recipe_ids: before.recipeIds, replace_selection: !!before.manualAdjustment };
+      selected_recipe_ids: before.recipeIds, replace_selection: !!before.manualAdjustment && (!override || before.recipeIds.length > 0) };
     const signature = JSON.stringify(body);
     if (pending.current?.signature !== signature) pending.current = { signature, key: requestKey() };
     const key = pending.current!.key;
@@ -29,7 +29,7 @@ export function useAiChat(planning: PlanningSettings) {
       menu.setDraft(old => old.requestKey !== before.requestKey ? old : { people: plan.people_count, mealDate: plan.as_of_date,
         recipeIds: plan.dishes.map(d => d.recipe_id), dishes: plan.dishes, rulePlan: plan, requestKey: requestKey(),
         planning: { people_count: plan.people_count, category_counts: plan.category_counts, allow_nonseasonal: plan.allow_nonseasonal } });
-      setInput(''); pending.current = null;
+      if (!override) setInput(''); pending.current = null;
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
   async function saveTemporary(recipeId: string) {
