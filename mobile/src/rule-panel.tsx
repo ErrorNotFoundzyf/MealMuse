@@ -1,6 +1,7 @@
 import { type ComponentRef, useEffect, useRef, useState } from 'react';
 import { Alert, Keyboard, Modal, Pressable, ScrollView, Switch, Text, useWindowDimensions, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { errorText, useApi, useResource } from './api';
 import { requestKey, useMenu } from './menu-draft';
@@ -125,7 +126,7 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
     <View style={{ paddingVertical: 6 }}><ChatComposer chat={chat} disabled={ruleBusy} /></View>
     <Modal visible={clearOpen} transparent animationType="fade" onRequestClose={() => setClearOpen(false)}>
       <View style={l.overlay}><Pressable accessibilityRole="button" accessibilityLabel="取消清空本餐" onPress={() => setClearOpen(false)} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }} />
-        <View accessibilityViewIsModal style={[l.sheet, { gap: 12, paddingBottom: 26 }]}><Text style={[s.section, { fontSize: 18 }]}>清空本餐？</Text><Text style={s.caption}>将清空本餐菜单、对话、备选菜和临时要求。人数与菜数会保留，已保存的食记不会改变。</Text><View style={[s.row, { marginTop: 4 }]}><View style={{ flex: 1 }}><Button label="取消" secondary onPress={() => setClearOpen(false)} /></View><View style={{ flex: 1 }}><Button label="确认清空" danger disabled={busy} onPress={clearCurrentMeal} /></View></View></View>
+        <SafeAreaView edges={['bottom', 'left', 'right']} accessibilityViewIsModal style={[l.sheet, { gap: 12, paddingBottom: 26 }]}><Text style={[s.section, { fontSize: 18 }]}>清空本餐？</Text><Text style={s.caption}>将清空本餐菜单、对话、备选菜和临时要求。人数与菜数会保留，已保存的食记不会改变。</Text><View style={[s.row, { marginTop: 4 }]}><View style={{ flex: 1 }}><Button label="取消" secondary onPress={() => setClearOpen(false)} /></View><View style={{ flex: 1 }}><Button label="确认清空" danger disabled={busy} onPress={clearCurrentMeal} /></View></View></SafeAreaView>
       </View>
     </Modal>
     <FilterSheet visible={sheet} title="本次人数与菜数" onClose={() => setSheet(false)} onApply={applySettings} applyDisabled={total < 1 || total > 20 || profile.loading} resetLabel="家庭默认" onReset={() => { setPeople(profile.data?.profile?.people_count ?? menu.draft.people); setCounts({ ...(profile.data?.profile?.category_counts ?? { meat: 1, vegetable: 2, soup: 1 }) }); setAllow(false); }}>
