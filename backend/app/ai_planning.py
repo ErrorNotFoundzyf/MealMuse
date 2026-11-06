@@ -99,6 +99,10 @@ def clean_reply(value):
     return "已按本次要求调整；配料和做法不完整时，请在确认前核对。" if re.search(r"治愈|治疗|保证|绝对安全|无过敏原|降火功效", value) else value
 
 
+def replacement_consent(message):
+    return bool(re.fullmatch(r'(?:好的?[,，]?|我)?\s*(?:允许|同意|可以)(?:一起|全部|都)?(?:替换|换掉|换|调整)?(?:吧)?', message.strip().rstrip('。！!')))
+
+
 def merge_constraints(memory, intent, pending, catalog):
     context = normalize("\n".join(pending))
     known = {i["id"] for i in catalog}
@@ -298,6 +302,21 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
     intent = client.ask(Intent, INTENT_PROMPT, {"current_dishes": [{"recipe_id": d["recipe_id"], "name": d["name"], "category_id": d["category_id"], "is_hearty": bool(is_hearty(d))} for d in original_dishes], "people_count": people, "category_counts": counts, "hearty_count": memory.get("hearty_count"),
         "conditions": memory.get("constraints", []), "preferences": memory.get("preferences", []), "messages": memory.get("messages", [])[-6:], "pending_user_messages": pending,
         "ingredients": [{"id": i["id"], "name": i["name"], "aliases": i["aliases"]} for i in catalog]}, max_tokens=1800)
+    confirmation = memory.get('replacement_confirmation')
+    latest_message = memory.get('pending', pending)[-1]
+    consent = replacement_consent(latest_message)
+    old_ids = {d['recipe_id'] for d in original_dishes}
+    if consent and confirmation and set(confirmation['menu_ids']) == old_ids:
+        intent.action = 'replace'
+        intent.target_recipe_ids = confirmation['target_ids']
+        intent.keep_recipe_ids = []
+        intent.category_counts = None
+    elif consent and not confirmation and memory.get('blocked') and '保留的菜可能不符合新要求' in next((m['content'] for m in reversed(memory.get('messages', [])) if m['role'] == 'assistant'), ''):
+        # Recover older drafts created before explicit confirmation state existed.
+        intent.action = 'replace'
+        intent.target_recipe_ids = list(old_ids)
+        intent.keep_recipe_ids = []
+        intent.category_counts = None
     memory["constraints"] = merge_constraints(memory, intent, pending, catalog)
     merge_hearty_requirement(memory, intent, pending)
     memory["preferences"] = list(dict.fromkeys([*memory.get("preferences", []), *[p[:200] for p in intent.preferences]]))[-20:]
@@ -375,8 +394,13 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
     if replace and (not targets or Counter(d["category_id"] for d in original_dishes) != Counter({k: v for k, v in expected_before.items() if v})):
         return original_dishes, "请确认要替换哪些菜；如果改变整桌菜数，请说明是否重新搭配。", True, people, counts
     keep = [d for d in original_dishes if d["recipe_id"] not in targets] if replace else list(original_dishes) if intent.action == "add" else [d for d in original_dishes if d["recipe_id"] in keeps]
+    def ask_to_replace(dishes):
+        additional = {d['recipe_id'] for d in dishes}
+        memory['replacement_confirmation'] = {'menu_ids': list(old_ids), 'target_ids': list((old_ids - {d['recipe_id'] for d in keep}) | additional)}
+        names = '、'.join(d['name'] for d in dishes)
+        return original_dishes, f'需要保留的{names}可能不符合本次要求，允许一起替换吗？', True, people, counts
     if any(conflicts(d, memory["constraints"]) for d in keep):
-        return original_dishes, "需要保留的菜与新增禁忌有冲突，请明确允许替换哪道菜。", True, people, counts
+        return ask_to_replace([d for d in keep if conflicts(d, memory['constraints'])])
     replaced = [d for d in original_dishes if replace and d["recipe_id"] in targets]
     blocked_ids = set(rejected_ids) | {d["recipe_id"] for d in replaced}
     blocked_sigs = set(rejected_sigs) | {signature(d) for d in replaced}
@@ -422,12 +446,14 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
     if len(set(selection.eligible_ids)) != len(selection.eligible_ids) or not set(selection.eligible_ids) <= lookup.keys():
         raise DomainError(502, "AI_INVALID_POOL", "模型备选包含未知或重复菜谱，请重试")
     approved = {i: lookup[i] for i in selection.eligible_ids}
-    # Models may omit frozen dishes from eligible_ids when only adding a dessert.
-    # Keep them only if this turn introduced no new dietary constraints or preferences.
-    if intent.action == 'add' and previous_context_verified and memory['constraints'] == previous_constraints and memory['preferences'] == previous_preferences:
+    # A missing ID is not evidence that an unchanged frozen dish became unsuitable.
+    # Ingredient exclusions can be checked directly; semantic conditions need a verified pool.
+    ingredient_only = not memory['preferences'] and all(c['kind'] == 'ingredient' for c in memory['constraints'])
+    unchanged_verified = previous_context_verified and memory['constraints'] == previous_constraints and memory['preferences'] == previous_preferences
+    if ingredient_only or unchanged_verified:
         approved.update({d['recipe_id']: d for d in keep})
     if any(d["recipe_id"] not in approved for d in keep):
-        return original_dishes, "保留的菜可能不符合新要求，请明确是否允许一起替换。", True, people, counts
+        return ask_to_replace([d for d in keep if d['recipe_id'] not in approved])
     if any(conflicts(d, memory["constraints"]) for d in approved.values()):
         raise DomainError(502, "AI_INVALID_POOL", "模型备选存在已知禁忌冲突，请重试")
     filled = fill_choices(selection, slots, approved, allowed, plan_id, memory["constraints"], keep, blocked_ids | recent_ids, blocked_sigs | recent_sigs)
@@ -445,6 +471,7 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
         dish["constraint_status"] = "needs_confirmation" if memory["constraints"] else "match"
         dish["constraint_reason"] = "存在明确饮食限制，菜谱配料与做法可能不完整，请制作前核对" if memory["constraints"] else ""
     memory["candidate_pool"] = list(cached.values())
+    memory.pop('replacement_confirmation', None)
     memory["extra_counts"] = dict(extra_counts)
     memory["pool_context"] = pool_context(people, counts, allow, memory)
     memory["pool_version"] = memory.get("pool_version", 0) + 1
@@ -493,13 +520,13 @@ def register_ai_routes(api, session_factory, app):
             memory = deepcopy(plan.ai_memory or {}) if plan else {}
             rejected_ids = deepcopy(plan.rejected_ids) if plan else []
             rejected_sigs = deepcopy(plan.rejected_signatures) if plan else []
-        pending = list(memory.get("pending", []))
+        pending = list(dict.fromkeys(memory.get("pending", [])))
         messages = list(memory.get("messages", []))
         if data.retry:
             if not pending:
                 raise DomainError(422, "NOTHING_TO_RETRY", "没有需要重试的消息")
         else:
-            if len(pending) >= 4:
+            if len(pending) >= 4 and not (memory.get('blocked') and replacement_consent(data.message)):
                 raise DomainError(422, "PENDING_MESSAGES", "请先重试并处理上一轮要求")
             pending.append(data.message)
             messages.append({"role": "user", "content": data.message})

@@ -271,6 +271,42 @@ def test_non_target_conflict_clarifies_instead_of_silent_change(env):
     failed=chat(client,first,text).json()
     assert failed['ai']['blocked'] and failed['dishes']==first['dishes']
 
+
+def test_replace_with_ingredient_exclusion_preserves_other_dishes_even_if_model_omits_them(env):
+    client, fake = env
+    first = chat(client, category_counts={'meat': 1, 'vegetable': 1}).json()
+    target, kept = first['dishes']
+    ingredient = next(i for i in target['ingredients'] if i['ingredient_id'] not in {k['ingredient_id'] for k in kept['ingredients']})
+    message = '不吃' + ingredient['name'] + '，换掉' + target['name']
+    fake.intent = {'action': 'replace', 'target_recipe_ids': [target['recipe_id']], 'constraints': [{'kind': 'ingredient', 'ingredient_id': ingredient['ingredient_id'], 'text': '不吃' + ingredient['name'], 'evidence': '不吃' + ingredient['name']}], 'reply': '换菜'}
+    def only_new(context):
+        chosen = next(d for d in context['candidate_recipes'] if d['recipe_id'] != kept['recipe_id'] and d['category_id'] == 'meat')
+        return {'eligible_ids': [chosen['recipe_id']], 'choices': [{'slot': 0, 'candidate_id': chosen['recipe_id'], 'suitability': 'unknown', 'reason': '避开指定食材'}], 'reply': '已经换好'}
+    fake.select = only_new
+    result = chat(client, first, message, category_counts={'meat': 1, 'vegetable': 1}).json()
+    assert not result['ai']['blocked'] and result['dishes'][1] == kept
+    assert result['dishes'][0]['recipe_id'] != target['recipe_id']
+
+
+def test_allow_replacement_resolves_pending_confirmation_even_if_model_clarifies_again(env):
+    client, fake = env
+    first = chat(client, category_counts={'meat': 1, 'vegetable': 1}).json()
+    target, kept = first['dishes']
+    fake.intent = {'action': 'replace', 'target_recipe_ids': [target['recipe_id']], 'preferences': ['清淡'], 'reply': '换菜'}
+    def omit_kept(context):
+        chosen = next(d for d in context['candidate_recipes'] if d['category_id'] == 'meat')
+        return {'eligible_ids': [chosen['recipe_id']], 'choices': [{'slot': 0, 'candidate_id': chosen['recipe_id'], 'suitability': 'match', 'reason': '清淡'}], 'reply': '调整'}
+    fake.select = omit_kept
+    blocked = chat(client, first, '换掉第一道，整桌清淡一点', category_counts={'meat': 1, 'vegetable': 1}).json()
+    assert blocked['ai']['blocked']
+    assert kept['name'] in blocked['ai']['messages'][-1]['content']
+    fake.intent = {'action': 'clarify', 'reply': '是否允许一起替换？'}
+    fake.select = None
+    result = chat(client, blocked, '允许替换', category_counts={'meat': 1, 'vegetable': 1}).json()
+    assert not result['ai']['blocked'] and not result['ai']['pending']
+    assert len(result['dishes']) == 2 and result['ai']['hearty_count'] is None
+    assert not {d['recipe_id'] for d in first['dishes']} & {d['recipe_id'] for d in result['dishes']}
+
 def test_request_replay_stale_revision_and_confirm_recheck(env):
     client,fake=env
     key=str(uuid4())
