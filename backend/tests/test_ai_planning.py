@@ -268,6 +268,31 @@ def test_manual_selection_over_quota_is_not_silently_removed(env):
     assert [d['recipe_id'] for d in result['dishes']] == selected
     assert '已选菜超过' in result['ai']['messages'][-1]['content']
 
+
+def test_ai_fills_after_manual_rule_swap_without_losing_selected_dishes(env):
+    client, fake = env
+    counts = {'meat': 2, 'vegetable': 1, 'soup': 1}
+    r = client.post('/api/v1/recommendations/manual-swap', json={'request_key': str(uuid4()), 'people_count': 4, 'category_counts': counts, 'allow_nonseasonal': True, 'selected_recipe_ids': ['r_tomato_egg', 'r_broccoli'], 'action': 'replace', 'recipe_id': 'r_tomato_egg'})
+    assert r.status_code == 200
+    manual = r.json()
+    result = chat(client, manual, '帮我补齐', category_counts=counts).json()
+    assert not result['ai']['blocked'] and len(result['dishes']) == 4
+    assert result['dishes'][:2] == manual['dishes']
+
+
+def test_manually_adjusted_ai_menu_can_swap_using_existing_candidates_without_ai(env):
+    client, fake = env
+    first = chat(client, category_counts={'meat': 1, 'vegetable': 1}).json()
+    target = first['dishes'][0]['recipe_id']
+    forbid_model(client)
+    body = {'request_key': str(uuid4()), 'people_count': 4, 'category_counts': first['category_counts'], 'allow_nonseasonal': True, 'selected_recipe_ids': [target], 'action': 'replace', 'recipe_id': target, 'plan_id': first['id'], 'expected_revision': first['revision']}
+    r = client.post('/api/v1/recommendations/manual-swap', json=body)
+    assert r.status_code == 200, r.json()
+    assert len(r.json()['dishes']) == 1 and r.json()['dishes'][0]['recipe_id'] != target
+    assert client.get('/api/v1/recommendations/' + first['id']).json() == first
+    body.update(request_key=str(uuid4()), expected_revision=first['revision'] + 1)
+    assert client.post('/api/v1/recommendations/manual-swap', json=body).status_code == 409
+
 def test_constraints_persist_and_require_explicit_unknown_ack(env):
     client,fake=env
     fake.intent={'action':'generate','constraints':[{'kind':'ingredient','ingredient_id':'i_beef','text':'不吃牛肉','evidence':'不要牛肉'}],'reply':'会避开牛肉'}

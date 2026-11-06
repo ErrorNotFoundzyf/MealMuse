@@ -68,9 +68,9 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
     if (busy) return;
     const current = menu.draft;
     const currentPlan = current.rulePlan;
-    if (action !== 'new' && !currentPlan) return;
-    const path = action === 'new' ? '/recommendations' : `/recommendations/${currentPlan!.id}/${action}`;
-    const body = action === 'new' ? { people_count: effectivePeople, category_counts: effectiveCounts, allow_nonseasonal: effective.allow_nonseasonal } : { expected_revision: currentPlan!.revision, use_current_menu: !!currentPlan!.ai?.blocked, ...(recipeId ? { recipe_id: recipeId } : {}) };
+    const manualSwap = action !== 'new' && (!currentPlan || !!current.manualAdjustment);
+    const path = manualSwap ? '/recommendations/manual-swap' : action === 'new' ? '/recommendations' : `/recommendations/${currentPlan!.id}/${action}`;
+    const body = manualSwap ? { action, selected_recipe_ids: current.recipeIds, people_count: effectivePeople, category_counts: effectiveCounts, allow_nonseasonal: effective.allow_nonseasonal, ...(recipeId ? { recipe_id: recipeId } : {}), ...(currentPlan ? { plan_id: currentPlan.id, expected_revision: currentPlan.revision } : {}) } : action === 'new' ? { people_count: effectivePeople, category_counts: effectiveCounts, allow_nonseasonal: effective.allow_nonseasonal } : { expected_revision: currentPlan!.revision, use_current_menu: !!currentPlan!.ai?.blocked, ...(recipeId ? { recipe_id: recipeId } : {}) };
     const signature = JSON.stringify({ path, body });
     if (pending.current?.signature !== signature) pending.current = { signature, key: requestKey() };
     const key = pending.current!.key;
@@ -78,7 +78,7 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
     try {
       const result = await api.request<RulePlan>(path, { method: 'POST', body: JSON.stringify({ ...body, request_key: key }) });
       if (draftRef.current.requestKey !== current.requestKey) { setError('选菜已发生变化，本次结果未覆盖当前菜单'); return; }
-      menu.setDraft(old => old.requestKey !== current.requestKey ? old : { people: result.people_count, mealDate: result.as_of_date, recipeIds: result.dishes.map(d => d.recipe_id), dishes: result.dishes, requestKey: requestKey(), rulePlan: result, planning: { people_count: result.people_count, category_counts: result.category_counts, allow_nonseasonal: result.allow_nonseasonal } });
+      menu.setDraft(old => old.requestKey !== current.requestKey ? old : { people: result.people_count, mealDate: result.as_of_date, recipeIds: result.dishes.map(d => d.recipe_id), dishes: result.dishes, requestKey: requestKey(), rulePlan: result, planning: action !== 'new' ? { ...effective, category_counts: { ...effectiveCounts } } : { people_count: result.people_count, category_counts: result.category_counts, allow_nonseasonal: result.allow_nonseasonal } });
       if (result.mode === 'chat') setInfo(action === 'replace' ? '已从本餐备选换好一道，其他菜保持不变。' : '已从本餐备选换好整桌菜单。');
       pending.current = null;
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
@@ -90,7 +90,7 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
     else void perform('new');
   }
   const folded = collapsed || keyboardShown;
-  const disableSwap = !plan || busy || !!chat.outgoing || !!plan?.confirmed_record_id || (!!plan?.ai?.blocked && plan.ai.can_use_current_menu === false) || !!menu.draft.manualAdjustment;
+  const disableSwap = busy || !!chat.outgoing || !!plan?.confirmed_record_id || (!!plan?.ai?.blocked && plan.ai.can_use_current_menu === false);
   function resetConversation() { Keyboard.dismiss(); setClearOpen(true); }
   function clearCurrentMeal() {
     if (busy) return;

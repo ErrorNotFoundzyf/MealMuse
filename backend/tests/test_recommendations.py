@@ -23,6 +23,43 @@ def confirm(client, plan, **overrides):
     return client.post('/api/v1/meal-records', json={'meal_date': time_context()['as_of_date'], 'people_count': plan['people_count'], 'recipe_ids': [d['recipe_id'] for d in plan['dishes']], 'request_key': str(uuid4()), 'plan_id': plan['id'], 'plan_revision': plan['revision'], **overrides})
 
 
+def manual_swap(client, **extra):
+    return client.post('/api/v1/recommendations/manual-swap', json={'request_key': str(uuid4()), 'people_count': 4, 'category_counts': {'meat': 2, 'vegetable': 1, 'soup': 1}, 'allow_nonseasonal': True, 'selected_recipe_ids': ['r_tomato_egg', 'r_broccoli'], 'action': 'replace', 'recipe_id': 'r_tomato_egg', **extra})
+
+
+@pytest.mark.parametrize('action', ['replace', 'regenerate'])
+def test_manual_menu_swaps_without_ai_and_keeps_actual_counts(client, action):
+    def forbidden():
+        raise AssertionError('Manual rule swap must not call AI')
+    client.app.state.ai_client_factory = forbidden
+    key = str(uuid4())
+    r = manual_swap(client, action=action, request_key=key)
+    assert r.status_code == 200, r.json()
+    p = r.json()
+    assert p['mode'] == 'rules' and Counter(d['category_id'] for d in p['dishes']) == {'meat': 1, 'vegetable': 1}
+    if action == 'replace':
+        assert p['dishes'][1]['recipe_id'] == 'r_broccoli'
+        assert p['dishes'][0]['recipe_id'] != 'r_tomato_egg'
+    assert manual_swap(client, action=action, request_key=key).json() == p
+    assert manual_swap(client, action=action, request_key=key, people_count=2).status_code == 409
+    assert confirm(client, p).status_code == 201
+
+
+def test_manual_swap_respects_recent_records_and_rolls_back_failure(client):
+    c = client.post('/api/v1/meal-records', json={'request_key': str(uuid4()), 'meal_date': time_context()['as_of_date'], 'people_count': 2, 'recipe_ids': ['r_broccoli']})
+    assert c.status_code == 201
+    r = manual_swap(client)
+    assert r.status_code == 409
+    assert manual_swap(client, action='regenerate').status_code == 200
+
+
+def test_manual_swap_cannot_keep_nonseasonal_or_unknown_ingredients(client):
+    ingredient = client.get('/api/v1/recipes/r_broccoli').json()['ingredients'][0]['ingredient_id']
+    assert client.patch('/api/v1/ingredients/' + ingredient, json={'seasons': []}).status_code == 200
+    assert manual_swap(client, allow_nonseasonal=False).status_code == 409
+    assert manual_swap(client, allow_nonseasonal=True).status_code == 200
+
+
 def test_exact_counts_profile_overrides_and_no_confirmation_on_generate(client):
     assert client.post('/api/v1/recommendations', json={'request_key': str(uuid4())}).status_code == 422
     client.put('/api/v1/profile', json={'people_count': 3, 'category_counts': {'meat': 1, 'vegetable': 1, 'soup': 1}})

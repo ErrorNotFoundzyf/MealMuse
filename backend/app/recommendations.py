@@ -1,4 +1,5 @@
 from collections import Counter
+from copy import deepcopy
 from datetime import date, timedelta
 from decimal import Decimal
 import hashlib
@@ -38,6 +39,21 @@ class PlanAction(Input):
     expected_revision: StrictInt = Field(ge=1)
     recipe_id: str | None = None
     use_current_menu: StrictBool = False
+
+
+class ManualSwapInput(GenerateInput):
+    selected_recipe_ids: list[str] = Field(min_length=1, max_length=20)
+    action: str = Field(pattern='^(replace|regenerate)$')
+    recipe_id: str | None = None
+    plan_id: str | None = None
+    expected_revision: StrictInt | None = Field(default=None, ge=1)
+
+    @field_validator('selected_recipe_ids')
+    @classmethod
+    def unique_selection(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError('所选菜品不能重复')
+        return value
 
 
 class ShoppingInput(Input):
@@ -265,6 +281,41 @@ def register_recommendation_routes(api, db):
     @api.get("/recommendations/{plan_id}")
     def read_plan(plan_id: str, session=Depends(db)):
         return plan_data(session, get_plan(session, plan_id))
+
+    @api.post('/recommendations/manual-swap')
+    def manual_swap(data: ManualSwapInput, session=Depends(db)):
+        existing = session.scalar(select(RulePlan).where(RulePlan.creation_key == data.request_key))
+        if existing:
+            if existing.creation_hash != digest(data):
+                raise DomainError(409, 'REQUEST_CHANGED', '这次换菜内容已变化，请重新操作')
+            return plan_data(session, existing)
+        source = get_plan(session, data.plan_id) if data.plan_id else None
+        if source and (source.revision != data.expected_revision or source.confirmed_record_id):
+            raise DomainError(409, 'STALE_PLAN', '菜单已变化，请重新读取')
+        if not data.people_count:
+            raise DomainError(422, 'PROFILE_REQUIRED', '请设置本次用餐人数')
+        selected = snapshots(session, data.selected_recipe_ids, source.dishes if source else None)
+        actual_counts = dict(Counter(d['category_id'] for d in selected))
+        if set(actual_counts) - (CATEGORIES | EXTRA_CATEGORIES):
+            raise DomainError(422, 'UNSUPPORTED_SWAP', '暂时支持荤菜、素菜、汤、甜品和水果换菜，其他类型可以自己挑选。')
+        fresh = {d['recipe_id']: d for d in candidates(session, data.allow_nonseasonal)}
+        dishes = [deepcopy(fresh.get(d['recipe_id'], d)) for d in selected]
+        memory = deepcopy(source.ai_memory) if source and source.ai_memory else None
+        if memory:
+            from .ai_planning import pool_context
+            conditions = memory.get('constraints', [])
+            memory = deepcopy(memory.get('last_valid_state', {}).get('memory', memory))
+            memory['constraints'], memory['blocked'], memory['pending'] = conditions, False, []
+            memory['extra_counts'] = {k: v for k, v in actual_counts.items() if k in EXTRA_CATEGORIES}
+            base = {k: v for k, v in actual_counts.items() if k in CATEGORIES}
+            memory['pool_context'] = pool_context(data.people_count, base, data.allow_nonseasonal, memory)
+        else:
+            base = actual_counts
+        plan = RulePlan(creation_key=data.request_key, creation_hash=digest(data), last_request_key='', last_payload_hash='', people_count=data.people_count,
+                        category_counts=base, dishes=dishes, allow_nonseasonal=data.allow_nonseasonal, as_of_date=time_context()['as_of_date'], ai_memory=memory,
+                        rejected_ids=deepcopy(source.rejected_ids) if source else [], rejected_signatures=deepcopy(source.rejected_signatures) if source else [])
+        session.add(plan); session.flush()
+        return change_plan(plan.id, PlanAction(request_key=data.request_key, expected_revision=plan.revision, recipe_id=data.recipe_id), session, regenerate=data.action == 'regenerate')
 
     def change_plan(plan_id, data, session, regenerate=False):
         plan = get_plan(session, plan_id)

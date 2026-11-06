@@ -576,13 +576,13 @@ def register_ai_routes(api, session_factory, app):
         memory["constraints"] = memory.get("constraints", [])
         before_model = deepcopy(memory)
         try:
-            dishes, reply, blocked, people, counts = run_turn(client, session_factory, plan_id, original, memory, pending, people, counts, allow, rejected_ids, rejected_sigs, data.settings_change, bool(original) and (not plan or data.replace_selection))
+            dishes, reply, blocked, people, counts = run_turn(client, session_factory, plan_id, original, memory, pending, people, counts, allow, rejected_ids, rejected_sigs, data.settings_change, bool(original) and (not plan or not plan.ai_memory or data.replace_selection))
         except DomainError as exc:
             if exc.code in {"AI_NETWORK", "AI_BUDGET"}:
                 from .rule_fallback import RuleFallback
                 memory = before_model
                 try:
-                    dishes, reply, blocked, people, counts = run_turn(RuleFallback(memory, data.settings_change), session_factory, plan_id, original, memory, pending, people, counts, allow, rejected_ids, rejected_sigs, data.settings_change, bool(original) and (not plan or data.replace_selection))
+                    dishes, reply, blocked, people, counts = run_turn(RuleFallback(memory, data.settings_change), session_factory, plan_id, original, memory, pending, people, counts, allow, rejected_ids, rejected_sigs, data.settings_change, bool(original) and (not plan or not plan.ai_memory or data.replace_selection))
                     reply = "模型暂不可用，已切换规则模式。" + reply
                     memory["last_action"] = "rule_fallback"
                 except DomainError as fallback_error:
