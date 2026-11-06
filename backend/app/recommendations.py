@@ -37,6 +37,7 @@ class PlanAction(Input):
     request_key: str = Field(min_length=16, max_length=80)
     expected_revision: StrictInt = Field(ge=1)
     recipe_id: str | None = None
+    use_current_menu: StrictBool = False
 
 
 class ShoppingInput(Input):
@@ -180,15 +181,20 @@ def shopping_list(session, dishes):
 
 
 def plan_data(session, plan):
+    from .ai_planning import clean_reply
+    memory = plan.ai_memory or {}
+    visible_messages = [{**m, 'content': clean_reply(m['content']) if m['role'] == 'assistant' else m['content']} for m in memory.get('messages', [])]
     return {"id": plan.id, "revision": plan.revision, "people_count": plan.people_count, "category_counts": plan.category_counts,
             "as_of_date": plan.as_of_date, "dishes": plan.dishes, "allow_nonseasonal": plan.allow_nonseasonal,
             "confirmed_record_id": plan.confirmed_record_id, "shopping_list": shopping_list(session, plan.dishes), "mode": "chat" if plan.ai_memory else "rules",
             "ai": {**{key: plan.ai_memory.get(key) for key in ("messages", "blocked", "unknown", "pending", "constraints", "pool_version", "last_action", "last_usage", "hearty_count")},
+                   "messages": visible_messages,
+                   "can_use_current_menu": bool(plan.dishes),
                    "has_candidate_pool": "candidate_pool" in plan.ai_memory,
                    "candidate_counts": dict(Counter(d["category_id"] for d in plan.ai_memory.get("candidate_pool", [])))} if plan.ai_memory else None}
 
 
-def validate_plan_confirmation(session, plan_id, revision, recipe_ids, people, meal_date, acknowledge_unknown=False, manual_adjustment=False):
+def validate_plan_confirmation(session, plan_id, revision, recipe_ids, people, meal_date, acknowledge_unknown=False, manual_adjustment=False, use_current_menu=False):
     plan = session.get(RulePlan, plan_id)
     if not plan or plan.confirmed_record_id or plan.revision != revision:
         raise DomainError(409, "STALE_PLAN", "推荐菜单已更新或确认，请重新读取后再确认")
@@ -196,6 +202,9 @@ def validate_plan_confirmation(session, plan_id, revision, recipe_ids, people, m
         raise DomainError(409, "PLAN_CHANGED", "推荐内容或日期已变化，请重新搭配；手动调整请使用自己挑")
     if plan.ai_memory:
         from .ai_planning import conflicts
+        if use_current_menu:
+            from .ai_planning import use_last_valid_menu
+            use_last_valid_menu(plan, session)
         if plan.ai_memory.get("blocked"):
             raise DomainError(409, "AI_PENDING", "本轮要求尚未处理完成，请先继续对话或重试")
         conditions = plan.ai_memory.get("constraints", [])

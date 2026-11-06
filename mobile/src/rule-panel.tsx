@@ -70,7 +70,7 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
     const currentPlan = current.rulePlan;
     if (action !== 'new' && !currentPlan) return;
     const path = action === 'new' ? '/recommendations' : `/recommendations/${currentPlan!.id}/${action}`;
-    const body = action === 'new' ? { people_count: effectivePeople, category_counts: effectiveCounts, allow_nonseasonal: effective.allow_nonseasonal } : { expected_revision: currentPlan!.revision, ...(recipeId ? { recipe_id: recipeId } : {}) };
+    const body = action === 'new' ? { people_count: effectivePeople, category_counts: effectiveCounts, allow_nonseasonal: effective.allow_nonseasonal } : { expected_revision: currentPlan!.revision, use_current_menu: !!currentPlan!.ai?.blocked, ...(recipeId ? { recipe_id: recipeId } : {}) };
     const signature = JSON.stringify({ path, body });
     if (pending.current?.signature !== signature) pending.current = { signature, key: requestKey() };
     const key = pending.current!.key;
@@ -89,7 +89,7 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
     else void perform('new');
   }
   const folded = collapsed || keyboardShown;
-  const disableSwap = busy || !!chat.outgoing || !!plan?.confirmed_record_id || !!plan?.ai?.blocked || !!menu.draft.manualAdjustment;
+  const disableSwap = busy || !!chat.outgoing || !!plan?.confirmed_record_id || (!!plan?.ai?.blocked && plan.ai.can_use_current_menu === false) || !!menu.draft.manualAdjustment;
   function resetConversation() { Keyboard.dismiss(); setClearOpen(true); }
   function clearCurrentMeal() {
     if (busy) return;
@@ -111,7 +111,7 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
             <Pressable accessibilityRole="button" accessibilityLabel={`换掉${dish.name}`} hitSlop={{ top: 6, bottom: 6 }} disabled={disableSwap} style={{ minHeight: 32, borderTopWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', opacity: disableSwap ? 0.4 : 1 }} onPress={() => perform('replace', dish.recipe_id)}><Text style={{ color: colors.green, fontSize: 12 }}>换一道</Text></Pressable>
           </View>)}
         </ScrollView>
-        <View style={[s.row, { paddingVertical: 6 }]}><Pressable accessibilityRole="button" accessibilityLabel="从本轮备选换整桌菜单" hitSlop={{ top: 4, bottom: 4 }} disabled={disableSwap} onPress={() => perform('regenerate')} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: disableSwap ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>换整桌</Text></Pressable><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy} onPress={onManual} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>自己调整</Text></Pressable><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy || !!chat.outgoing || !!plan.confirmed_record_id || !!plan.ai?.blocked} onPress={() => router.push('/menu')} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.green, alignItems: 'center', justifyContent: 'center', opacity: busy || chat.outgoing || plan.confirmed_record_id || plan.ai?.blocked ? 0.4 : 1 }}><Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>确认菜单</Text></Pressable></View>
+        <View style={[s.row, { paddingVertical: 6 }]}><Pressable accessibilityRole="button" accessibilityLabel="从本轮备选换整桌菜单" hitSlop={{ top: 4, bottom: 4 }} disabled={disableSwap} onPress={() => perform('regenerate')} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: disableSwap ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>换整桌</Text></Pressable><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy} onPress={onManual} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.4 : 1 }}><Text style={{ color: colors.green, fontSize: 13, fontWeight: '700' }}>自己调整</Text></Pressable><Pressable accessibilityRole="button" hitSlop={{ top: 4, bottom: 4 }} disabled={busy || !!chat.outgoing || !!plan.confirmed_record_id || (!!plan.ai?.blocked && plan.ai.can_use_current_menu === false)} onPress={() => router.push('/menu')} style={{ flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: colors.green, alignItems: 'center', justifyContent: 'center', opacity: busy || chat.outgoing || plan.confirmed_record_id || (plan.ai?.blocked && plan.ai.can_use_current_menu === false) ? 0.4 : 1 }}><Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>确认菜单</Text></Pressable></View>
       </>}
     </View>}
     {plan?.ai?.hearty_count != null && <Text style={l.detail}>本餐要求：{plan.ai.hearty_count}道硬菜（按菜谱标签）</Text>}
@@ -122,7 +122,7 @@ export function RulePanel({ onManual }: { onManual: () => void }) {
       {!!info && <Text accessibilityLiveRegion="polite" style={[l.detail, { color: colors.green }]}>{info}</Text>}
       {!!menu.draft.manualAdjustment && <Text style={l.detail}>选菜或配置已调整，请发送要求更新本餐备选后再用按钮换菜。</Text>}
       <ChatMessages plan={plan} outgoing={chat.outgoing} onRetry={chat.retryOutgoing} onEdit={chat.editOutgoing} />
-      {!!plan?.ai?.blocked && <Notice text="本轮要求尚未完成，请继续说明或重试。当前菜单暂不能确认。" />}
+      {!!plan?.ai?.blocked && <Notice text="新要求尚未应用。可以继续对话，或按当前菜单换菜、自己挑选及确认；明确忌口仍会检查。" />}
       {profile.error && <Notice text={profile.error} error onRetry={profile.reload} />}
       {!complete && !profile.loading && <Notice text="请先设置家庭默认，或点击「人数与菜数」设置本次配置。" />}
       {!plan && <><Text style={l.detail}>{chat.status.data?.configured ? '直接描述想吃什么，AI 会按要求筛选并搭配。也可按本次配置快速搭配。' : 'AI 正在等待后端配置，可先按本次配置搭配，或自己挑菜。'}</Text><Button label={complete ? '按本次配置快速搭配' : '设置本次搭配'} busy={busy} disabled={profile.loading || !!chat.outgoing} onPress={generate} /></>}

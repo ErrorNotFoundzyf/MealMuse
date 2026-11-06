@@ -432,6 +432,50 @@ def forbid_model(client):
     client.app.state.ai_client_factory = forbidden
 
 
+@pytest.mark.parametrize('action', ['replace', 'regenerate', 'confirm'])
+def test_failed_turn_does_not_lock_previous_menu_when_user_chooses_it(env, action):
+    client, fake = env
+    first = chat(client, category_counts={'meat': 1, 'vegetable': 1}).json()
+    fake.intent = {'action': 'clarify', 'reply': '请进一步说明要求'}
+    blocked = chat(client, first, '想要一种无法确定的口味', category_counts={'meat': 1, 'vegetable': 1}).json()
+    assert blocked['ai']['blocked'] and blocked['ai']['can_use_current_menu']
+    assert blocked['dishes'] == first['dishes']
+    forbid_model(client)
+    if action == 'confirm':
+        assert confirm(client, blocked).status_code == 409
+        assert confirm(client, blocked, use_current_menu=True).status_code == 201
+    else:
+        r = client.post('/api/v1/recommendations/' + blocked['id'] + '/' + action, json={'request_key': str(uuid4()), 'expected_revision': blocked['revision'], 'use_current_menu': True, **({'recipe_id': blocked['dishes'][0]['recipe_id']} if action == 'replace' else {})})
+        assert r.status_code == 200, r.json()
+        assert not r.json()['ai']['blocked'] and not r.json()['ai']['pending']
+
+
+def test_using_previous_menu_does_not_ignore_new_ingredient_exclusion(env):
+    client, fake = env
+    first = chat(client, category_counts={'meat': 1}).json()
+    ingredient = first['dishes'][0]['ingredients'][0]
+    message = '不吃' + ingredient['name']
+    fake.intent = {'action': 'clarify', 'constraints': [{'kind': 'ingredient', 'ingredient_id': ingredient['ingredient_id'], 'text': message, 'evidence': message}], 'reply': '还需说明'}
+    blocked = chat(client, first, message, category_counts={'meat': 1}).json()
+    assert confirm(client, blocked, use_current_menu=True, acknowledge_unknown=True).status_code == 409
+
+
+def test_internal_fields_are_hidden_in_new_and_historical_assistant_replies(env):
+    client, fake = env
+    fake.select = lambda c: {'eligible_ids': [d['recipe_id'] for d in c['candidate_recipes']], 'choices': [{'slot': 0, 'candidate_id': c['candidate_recipes'][0]['recipe_id'], 'suitability': 'match', 'reason': '家常'}], 'reply': '请从eligible_ids中选择，keep_dishes已冻结'}
+    plan = chat(client, category_counts={'meat': 1}).json()
+    assert not plan['ai']['blocked']
+    assert 'eligible_ids' not in plan['ai']['messages'][-1]['content']
+    with Session(client.app.state.engine) as session:
+        row = session.get(RulePlan, plan['id'])
+        memory = deepcopy(row.ai_memory)
+        memory['messages'][-1]['content'] = '请查看candidate_recipes和slots'
+        row.ai_memory = memory
+        session.commit()
+    result = client.get('/api/v1/recommendations/' + plan['id']).json()
+    assert 'candidate_recipes' not in result['ai']['messages'][-1]['content']
+
+
 def test_buttons_use_only_candidate_two_without_model_or_chat_messages(env):
     client,fake=env
     approved=[]

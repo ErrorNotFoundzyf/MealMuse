@@ -16,14 +16,15 @@ export default function MenuReview() {
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [saved, setSaved] = useState<MealRecord>();
   const draft = menu.draft;
   const [acknowledged, setAcknowledged] = useState(false);
-  useEffect(() => setAcknowledged(false), [draft.requestKey]);
+  const [ackPending, setAckPending] = useState(false);
+  useEffect(() =>  { setAcknowledged(false); setAckPending(false); }, [draft.requestKey]);
   const unknown = draft.rulePlan?.ai?.constraints?.map(c => c.text) || [];
   function changeDate(value: string) { menu.setDraft(old => ({ ...old, mealDate: value, requestKey: requestKey() })); }
   async function save() {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.mealDate) || draft.mealDate > chinaToday()) { setError('请填写今天或过去的日期，格式如 2026-11-04'); return; }
     setBusy(true); setError('');
     try {
-      const record = await api.request<MealRecord>(draft.recordId ? `/meal-records/${draft.recordId}` : '/meal-records', { method: draft.recordId ? 'PUT' : 'POST', body: JSON.stringify({ meal_date: draft.mealDate, people_count: draft.people, recipe_ids: draft.recipeIds, request_key: draft.requestKey, ...(draft.rulePlan ? { plan_id: draft.rulePlan.id, plan_revision: draft.rulePlan.revision, manual_adjustment: !!draft.manualAdjustment, acknowledge_unknown: acknowledged } : {}), ...(draft.recordId ? { revision: draft.revision } : {}) }) });
+      const record = await api.request<MealRecord>(draft.recordId ? `/meal-records/${draft.recordId}` : '/meal-records', { method: draft.recordId ? 'PUT' : 'POST', body: JSON.stringify({ meal_date: draft.mealDate, people_count: draft.people, recipe_ids: draft.recipeIds, request_key: draft.requestKey, ...(draft.rulePlan ? { plan_id: draft.rulePlan.id, plan_revision: draft.rulePlan.revision, manual_adjustment: !!draft.manualAdjustment, acknowledge_unknown: acknowledged, use_current_menu: !!draft.rulePlan?.ai?.blocked && ackPending } : {}), ...(draft.recordId ? { revision: draft.revision } : {}) }) });
       setSaved(record); menu.resetIfKey(draft.requestKey); api.changed();
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
@@ -40,8 +41,8 @@ export default function MenuReview() {
       {!draft.rulePlan && <Text style={s.caption}>按自己挑方式确认，允许主动选择近期吃过的菜。</Text>}
       {draft.rulePlan?.ai?.hearty_count != null && <Text style={s.caption}>本餐要求：{draft.rulePlan.ai.hearty_count}道带硬菜标签的菜品。</Text>}
       {!!unknown.length && <View style={s.card}><Text style={s.section}>确认前请核对</Text><Text style={s.caption}>{unknown.join('、')}：菜谱可能未完整记录调料或做法，不能据此保证满足限制。</Text><View style={s.between}><Text style={[s.body, { flex: 1 }]}>我会核对配料与做法</Text><Switch accessibilityLabel="我会核对配料与做法" value={acknowledged} onValueChange={setAcknowledged} /></View></View>}
-      {draft.rulePlan?.ai?.blocked && <Notice text="本轮要求还未处理完成，请返回对话继续说明或重试。" error />}
-      <Button label={draft.recordId ? '保存更正' : '确认菜单并记入食记'} busy={busy} disabled={!draft.recipeIds.length || !!draft.outgoing || !!draft.rulePlan?.ai?.blocked || (!!unknown.length && !acknowledged)} onPress={save} />
+      {draft.rulePlan?.ai?.blocked && <View style={s.card}><Text style={s.caption}>新要求尚未应用。继续确认将保存当前显示的菜单。</Text><View style={s.between}><Text style={[s.body, { flex: 1 }]}>我选择使用当前菜单</Text><Switch accessibilityLabel="使用当前菜单并忽略未完成的新要求" value={ackPending} onValueChange={setAckPending} /></View></View>}
+      <Button label={draft.recordId ? '保存更正' : '确认菜单并记入食记'} busy={busy} disabled={!draft.recipeIds.length || !!draft.outgoing || (!!draft.rulePlan?.ai?.blocked && (draft.rulePlan.ai.can_use_current_menu === false || !ackPending)) || (!!unknown.length && !acknowledged)} onPress={save} />
       {draft.recordId && <Text style={s.caption}>已有菜品使用当时保存的名称与食材，更正不会随菜谱库更新而改变历史。</Text>}
     </>}
   </Page>;
