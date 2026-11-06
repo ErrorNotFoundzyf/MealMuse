@@ -19,6 +19,8 @@ class RuleFallback:
             message = pending[0].strip() if len(pending) == 1 else ''
             if self.settings_change and len(pending) == 1:
                 return Intent(action='generate', reply='模型暂不可用，正在按规则重新搭配')
+            if context.get('preserve_manual_selection') and message in {'帮我补齐', '补齐剩下的菜', '保留我已经选好的菜，按本次人数和菜数补齐剩余菜品。'}:
+                return Intent(action='generate', reply='保留已选，按规则补齐')
             if re.fullmatch(r'(帮我|请|重新|再)?(搭配|推荐|生成)(一餐|一桌|菜单|菜)?[。！! ]*', message):
                 return Intent(action='generate', reply='模型暂不可用，正在按规则搭配')
             if re.fullmatch(r'(?:今天|我|想|要|吃|来|请|帮我|推荐|搭配|一道|一份|一个|\s)+硬菜[。！! ]*', message):

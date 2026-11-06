@@ -233,6 +233,41 @@ def test_ai_selects_and_two_target_replacement_freezes_other_two(env):
     assert not set(targets)&{d['recipe_id'] for d in updated['dishes']}
     assert len(updated['ai']['messages'])==4
 
+
+@pytest.mark.parametrize('offline', [False, True])
+def test_first_chat_preserves_manual_selection_and_fills_remaining_slots(env, offline):
+    client, fake = env
+    chosen = ['r_tomato_egg', 'r_broccoli']
+    counts = {'meat': 2, 'vegetable': 1, 'soup': 1}
+    fake.failure = offline
+    fake.intent = {'action': 'generate', 'category_counts': {'meat': 1, 'soup': 1}, 'reply': '补齐剩下两道'}
+    result = chat(client, message='保留我已经选好的菜，按本次人数和菜数补齐剩余菜品。', selected_recipe_ids=chosen, category_counts=counts).json()
+    assert not result['ai']['blocked'], result
+    assert result['category_counts'] == counts and len(result['dishes']) == 4
+    assert [d['recipe_id'] for d in result['dishes'][:2]] == chosen
+    assert Counter(d['category_id'] for d in result['dishes'][2:]) == {'meat': 1, 'soup': 1}
+    if not offline:
+        assert fake.calls[0][1]['preserve_manual_selection'] is True
+        assert len(fake.calls[-1][1]['slots']) == 2
+
+
+def test_manual_changes_to_existing_ai_menu_are_preserved_when_filling(env):
+    client, fake = env
+    first = chat(client).json()
+    chosen = [first['dishes'][0]['recipe_id']]
+    result = chat(client, first, message='帮我补齐', selected_recipe_ids=chosen, replace_selection=True).json()
+    assert not result['ai']['blocked'] and len(result['dishes']) == 4
+    assert result['dishes'][0] == first['dishes'][0]
+
+
+def test_manual_selection_over_quota_is_not_silently_removed(env):
+    client, fake = env
+    selected = ['r_tomato_egg', 'r_shiitake_chicken']
+    result = chat(client, selected_recipe_ids=selected, category_counts={'meat': 1}).json()
+    assert result['ai']['blocked']
+    assert [d['recipe_id'] for d in result['dishes']] == selected
+    assert '已选菜超过' in result['ai']['messages'][-1]['content']
+
 def test_constraints_persist_and_require_explicit_unknown_ack(env):
     client,fake=env
     fake.intent={'action':'generate','constraints':[{'kind':'ingredient','ingredient_id':'i_beef','text':'不吃牛肉','evidence':'不要牛肉'}],'reply':'会避开牛肉'}
