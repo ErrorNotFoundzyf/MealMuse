@@ -120,6 +120,20 @@ def test_offline_dessert_alias_is_added_to_menu(env):
     assert result['dishes'][1]['category_id'] == 'dessert'
 
 
+def test_replace_and_add_in_one_message_performs_both_operations(env):
+    client, fake = env
+    assert client.post('/api/v1/recipes', json={'name': '布丁测试', 'category_id': 'dessert', 'ingredients': [{'ingredient_id': 'i_egg'}]}).status_code == 201
+    counts = {'meat': 1, 'vegetable': 1}
+    first = chat(client, category_counts=counts).json()
+    target, kept = first['dishes']
+    fake.intent = {'action': 'replace', 'target_recipe_ids': [target['recipe_id']], 'extra_add': {'dessert': 1}, 'reply': '换菜并添加'}
+    result = chat(client, first, '换掉第一道，再加一份甜品，其他不变', category_counts=counts).json()
+    assert not result['ai']['blocked'], result
+    assert target['recipe_id'] not in {d['recipe_id'] for d in result['dishes']}
+    assert kept in result['dishes']
+    assert Counter(d['category_id'] for d in result['dishes']) == {'meat': 1, 'vegetable': 1, 'dessert': 1}
+
+
 def test_add_dessert_accepts_model_pool_containing_only_new_choices(env):
     client, fake = env
     dessert = client.post('/api/v1/recipes', json={'name': '甜点测试', 'category_id': 'dessert', 'ingredients': [{'ingredient_id': 'i_egg'}]}).json()

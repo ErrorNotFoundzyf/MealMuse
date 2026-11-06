@@ -393,7 +393,7 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
     expected_before = {**original_counts, **dict(Counter(d['category_id'] for d in original_dishes if d['category_id'] in EXTRA_CATEGORIES))}
     if replace and (not targets or Counter(d["category_id"] for d in original_dishes) != Counter({k: v for k, v in expected_before.items() if v})):
         return original_dishes, "请确认要替换哪些菜；如果改变整桌菜数，请说明是否重新搭配。", True, people, counts
-    keep = [d for d in original_dishes if d["recipe_id"] not in targets] if replace else list(original_dishes) if intent.action == "add" else [d for d in original_dishes if d["recipe_id"] in keeps]
+    keep = [d for d in original_dishes if d["recipe_id"] not in targets] if replace or intent.action == 'add' else [d for d in original_dishes if d["recipe_id"] in keeps]
     def ask_to_replace(dishes):
         additional = {d['recipe_id'] for d in dishes}
         memory['replacement_confirmation'] = {'menu_ids': list(old_ids), 'target_ids': list((old_ids - {d['recipe_id'] for d in keep}) | additional)}
@@ -401,7 +401,7 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
         return original_dishes, f'需要保留的{names}可能不符合本次要求，允许一起替换吗？', True, people, counts
     if any(conflicts(d, memory["constraints"]) for d in keep):
         return ask_to_replace([d for d in keep if conflicts(d, memory['constraints'])])
-    replaced = [d for d in original_dishes if replace and d["recipe_id"] in targets]
+    replaced = [d for d in original_dishes if (replace or intent.action == 'add') and d["recipe_id"] in targets]
     blocked_ids = set(rejected_ids) | {d["recipe_id"] for d in replaced}
     blocked_sigs = set(rejected_sigs) | {signature(d) for d in replaced}
     with session_factory() as session:

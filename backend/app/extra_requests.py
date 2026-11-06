@@ -16,7 +16,7 @@ def extra_additions(messages):
             for clause in re.split(r'[，,。；;！!\n]', message):
                 if not mentions_extra(category, clause):
                     continue
-                if re.search(r'(?:不要|不加|不用|别加|不需要).{0,6}(?:' + labels + ')', clause):
+                if re.search(r'(?:不要|不加|不用|别加|不需要|不想吃|不想要|不吃).{0,6}(?:' + labels + ')', clause):
                     result.pop(category, None)
                     cancelled.add(category)
                     continue

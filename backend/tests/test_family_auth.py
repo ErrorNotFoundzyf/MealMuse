@@ -39,3 +39,16 @@ def test_login_rate_limit_and_invalid_token():
     except Exception as error:
         assert error.code == 'LOGIN_LIMITED'
     assert not auth.verify('invalid.token')
+
+
+def test_session_expiration_restart_and_key_rotation(monkeypatch):
+    config = make_config('family', 'test-password')
+    monkeypatch.setattr('app.family_auth.time', lambda: 1000)
+    auth = FamilyAuth(config)
+    token = auth.login('family', 'test-password', 'device')
+    assert FamilyAuth(config).verify(token)  # Service restart keeps valid device sessions.
+    assert not FamilyAuth(make_config('family', 'test-password')).verify(token)
+    for invalid in ('', 'broken', 'a.b.c', 'a.中文', 'x' * 1025):
+        assert not auth.verify(invalid)
+    monkeypatch.setattr('app.family_auth.time', lambda: 1000 + 30 * 86400)
+    assert not auth.verify(token)
