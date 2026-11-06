@@ -87,6 +87,39 @@ def test_missing_extra_keeps_existing_menu_and_explains_shortage(env):
     assert '甜点菜谱不足' in failed['ai']['messages'][-1]['content']
 
 
+@pytest.mark.parametrize(('message', 'category', 'number'), [
+    ('加一份甜品', 'dessert', 1), ('想吃一份甜品', 'dessert', 1),
+    ('再加两个甜点', 'dessert', 2), ('加一份水果', 'fruit', 1),
+    ('推荐水果', 'fruit', 1), ('再来两份果盘', 'fruit', 2),
+])
+def test_explicit_extra_alias_and_quantity_override_model_clarification(env, message, category, number):
+    client, fake = env
+    for index in range(number):
+        assert client.post('/api/v1/recipes', json={'name': category + str(index), 'category_id': category, 'ingredients': [{'ingredient_id': 'i_egg'}]}).status_code == 201
+    counts = {'meat': 1, 'vegetable': 1}
+    first = chat(client, category_counts=counts).json()
+    # The rule parser must recover clear requests even if the model asks again,
+    # supplies zero extra items or mistakes an extra item for a base quota.
+    fake.intent = {'action': 'clarify', 'extra_add': {category: 0}, 'category_counts': {category: 1}, 'reply': '请明确数量'}
+    result = chat(client, first, message, category_counts=counts).json()
+    assert not result['ai']['blocked'], result
+    assert result['category_counts'] == counts
+    assert result['dishes'][:2] == first['dishes']
+    assert sum(d['category_id'] == category for d in result['dishes']) == number
+    assert len(result['dishes']) == 2 + number
+    assert confirm(client, result).status_code == 201
+
+
+def test_offline_dessert_alias_is_added_to_menu(env):
+    client, fake = env
+    assert client.post('/api/v1/recipes', json={'name': '甜品测试', 'category_id': 'dessert', 'ingredients': [{'ingredient_id': 'i_egg'}]}).status_code == 201
+    first = chat(client, category_counts={'meat': 1}).json()
+    fake.failure = True
+    result = chat(client, first, '加一份甜品', category_counts={'meat': 1}).json()
+    assert not result['ai']['blocked'] and result['dishes'][0] == first['dishes'][0]
+    assert result['dishes'][1]['category_id'] == 'dessert'
+
+
 def test_add_dessert_accepts_model_pool_containing_only_new_choices(env):
     client, fake = env
     dessert = client.post('/api/v1/recipes', json={'name': '甜点测试', 'category_id': 'dessert', 'ingredients': [{'ingredient_id': 'i_egg'}]}).json()

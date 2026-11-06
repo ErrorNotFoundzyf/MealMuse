@@ -3,6 +3,7 @@ import re
 from collections import Counter
 from .errors import DomainError
 from .recommendations import select_menu
+from .extra_requests import extra_additions
 
 
 class RuleFallback:
@@ -22,9 +23,9 @@ class RuleFallback:
                 return Intent(action='generate', reply='模型暂不可用，正在按规则搭配')
             if re.fullmatch(r'(?:今天|我|想|要|吃|来|请|帮我|推荐|搭配|一道|一份|一个|\s)+硬菜[。！! ]*', message):
                 return Intent(action='generate', reply='模型暂不可用，正在按硬菜标签搭配')
-            extra = re.fullmatch(r'(?:今天|我|想|要|请|帮我|再|也|\s)*(?:加|来|推荐)(?:上|个|一份|一个|一道|一些|点|一盘|一碗|一款|一)?(?:个|份|道|盘|碗|款)?\s*(甜点|水果)[。！! ]*', message)
+            extra = re.fullmatch(r'(?:今天|我|想|要|请|帮我|再|也|\s)*(?:添加|增加|加|来|推荐|想吃|想要)(?:上|点|一些)?\s*(?:\d+|[一二两三四五六七八九十])?\s*(?:个|份|道|盘|碗|款)?\s*(甜点|甜品|水果|果盘)[。！! ]*', message)
             if extra:
-                return Intent(action='add', extra_add={('dessert' if extra.group(1) == '甜点' else 'fruit'): 1}, reply='正在按规则添加')
+                return Intent(action='add', extra_add=extra_additions([message])[0], reply='正在按规则添加')
             for ingredient in context['ingredients']:
                 for name in [ingredient['name'], *ingredient.get('aliases', [])]:
                     if re.fullmatch(r'(我|家里人)?(不吃|不要|不能吃|忌口)\s*' + re.escape(name) + r'[。！! ]*', message) or re.fullmatch(re.escape(name) + r'过敏[。！! ]*', message):
