@@ -37,7 +37,7 @@ export function MenuProvider({ children }: React.PropsWithChildren) {
         try {
           const parsed = JSON.parse(stored) as Draft;
           if (Array.isArray(parsed.recipeIds) && parsed.recipeIds.every(id => typeof id === 'string') && parsed.recipeIds.length <= 20 && typeof parsed.requestKey === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.mealDate) && Number.isInteger(parsed.people) && parsed.people >= 1 && parsed.people <= 30 && Array.isArray(parsed.dishes)) {
-            next = parsed.outgoing?.status === 'sending' ? { ...parsed, outgoing: { ...parsed.outgoing, status: 'failed', error: '上次请求未完成，请重试确认结果。' } } : parsed;
+            next = { ...parsed, outgoing: undefined, ...(parsed.rulePlan?.mode === 'chat' ? { rulePlan: undefined, manualAdjustment: true } : {}) };
           }
         } catch { /* An invalid local draft does not affect confirmed records. */ }
       }

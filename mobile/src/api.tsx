@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { useFocusEffect } from 'expo-router';
-import type { Page } from './types';
+import type { MealDish, Page } from './types';
 
 type Api = {
   ready: boolean; baseUrl: string; hasToken: boolean; revision: number;
@@ -10,9 +10,10 @@ type Api = {
   login: (username: string, password: string) => Promise<void>; logout: () => Promise<void>; retryAuth: () => void;
   saveConnection: (url: string, token: string, replaceToken?: boolean) => Promise<void>;
   request: <T>(path: string, options?: RequestInit, timeoutMs?: number) => Promise<T>;
+  streamExplanation?: (dishes: MealDish[], onText: (text: string) => void, signal?: AbortSignal) => Promise<string>;
   changed: () => void;
 };
-const ApiContext = createContext<Api | null>(null);
+export const ApiContext = createContext<Api | null>(null);
 export const errorText = (error: unknown) => error instanceof Error ? error.message : '操作未完成，请重试';
 
 export function ApiProvider({ children }: React.PropsWithChildren) {

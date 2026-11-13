@@ -80,7 +80,7 @@ def signature(dish):
 
 
 def recent_exclusions(session, today):
-    start = (date.fromisoformat(today) - timedelta(days=2)).isoformat()
+    start = (date.fromisoformat(today) - timedelta(days=3)).isoformat()
     records = session.scalars(select(MealRecord).where(MealRecord.deleted_at.is_(None), MealRecord.meal_date >= start, MealRecord.meal_date <= today))
     dishes = [d for record in records for d in record.dishes]
     return {d["recipe_id"] for d in dishes}, {signature(d) for d in dishes}
@@ -138,7 +138,7 @@ def select_menu(pool, counts, avoid_ids=(), allow_nonseasonal=False, hearty_coun
         if len(available) < count:
             shortage.append(f"{names[category]}还缺{count - len(available)}道")
     if shortage:
-        advice = "。请补充菜谱或调整本次菜数；已包含非当季与季节未设置食材，最近三天的菜仍不会放宽。" if allow_nonseasonal else "。可补充菜谱、调整本次菜数，或明确允许非当季及季节未设置食材后重试；最近三天的菜不会放宽。"
+        advice = "。请补充菜谱或调整本次菜数；已包含非当季与季节未设置食材，今天及前三天的菜仍不会放宽。" if allow_nonseasonal else "。可补充菜谱、调整本次菜数，或明确允许非当季及季节未设置食材后重试；今天及前三天的菜不会放宽。"
         raise DomainError(409, "INSUFFICIENT_CANDIDATES", "、".join(shortage) + advice)
     rng = SystemRandom()
     ranked = [(dish, rng.random() * 0.4) for dish in pool]

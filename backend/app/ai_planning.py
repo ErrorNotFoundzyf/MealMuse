@@ -444,7 +444,7 @@ def run_turn(client, session_factory, plan_id, original_dishes, memory, pending,
     with session_factory() as session:
         recent_ids, recent_sigs = recent_exclusions(session, time_context()["as_of_date"])
         if any(d["recipe_id"] in recent_ids or signature(d) in recent_sigs for d in keep):
-            raise DomainError(409, "KEPT_DISH_RECENT", "保留的菜最近三天已确认过，请重新搭配")
+            raise DomainError(409, "KEPT_DISH_RECENT", "保留的菜今天及前三天已确认过，请重新搭配")
         pool = candidates(session, allow, blocked_ids, blocked_sigs)
         for dish in keep:
             if not dish["recipe_id"].startswith("tmp_"):

@@ -85,9 +85,9 @@ def test_season_strict_and_explicit_expansion(client):
     assert expanded.json()['shopping_list'][0]['season_status'] == 'season_unknown'
 
 
-def test_three_calendar_dates_are_hard_excluded_not_scored(client):
+def test_four_calendar_dates_are_hard_excluded_not_scored(client):
     today = date.fromisoformat(time_context()['as_of_date'])
-    for days, recipe in [(0, 'r_broccoli'), (1, 'r_cucumber'), (2, 'r_potato'), (3, 'r_spinach')]:
+    for days, recipe in [(0, 'r_broccoli'), (1, 'r_cucumber'), (3, 'r_potato'), (4, 'r_spinach')]:
         response = client.post('/api/v1/meal-records', json={'meal_date': (today-timedelta(days=days)).isoformat(), 'people_count': 2, 'recipe_ids': [recipe], 'request_key': str(uuid4())})
         assert response.status_code == 201
     result = generate(client, category_counts={'vegetable': 2}, allow_nonseasonal=True)

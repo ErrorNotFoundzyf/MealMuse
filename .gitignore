@@ -27,3 +27,8 @@ mobile/ios/
 *.apk
 backend/llm.local.json
 backend/auth.local.json
+
+# Generated exports, packages, and nested dependencies
+node_modules/
+outputs/
+dist/

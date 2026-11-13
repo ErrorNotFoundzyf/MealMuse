@@ -1,0 +1,275 @@
+[
+  {
+    "id": "i_tomato",
+    "name": "西红柿",
+    "before": [
+      "summer",
+      "autumn"
+    ],
+    "after": [
+      "all_year"
+    ]
+  },
+  {
+    "id": "i_broccoli",
+    "name": "西兰花",
+    "before": [
+      "autumn",
+      "winter",
+      "spring"
+    ],
+    "after": [
+      "all_year"
+    ]
+  },
+  {
+    "id": "i_carrot",
+    "name": "胡萝卜",
+    "before": [
+      "autumn",
+      "winter"
+    ],
+    "after": [
+      "all_year"
+    ]
+  },
+  {
+    "id": "i_cabbage",
+    "name": "大白菜",
+    "before": [
+      "autumn",
+      "winter"
+    ],
+    "after": [
+      "all_year"
+    ]
+  },
+  {
+    "id": "i_water_spinach",
+    "name": "空心菜",
+    "before": [
+      "summer"
+    ],
+    "after": [
+      "spring",
+      "summer"
+    ]
+  },
+  {
+    "id": "i_winter_melon",
+    "name": "冬瓜",
+    "before": [
+      "summer",
+      "autumn"
+    ],
+    "after": [
+      "all_year"
+    ]
+  },
+  {
+    "id": "i_radish",
+    "name": "白萝卜",
+    "before": [
+      "autumn",
+      "winter"
+    ],
+    "after": [
+      "all_year"
+    ]
+  },
+  {
+    "id": "i_shrimp",
+    "name": "虾",
+    "before": [],
+    "after": [
+      "all_year"
+    ]
+  },
+  {
+    "id": "c3979f27-b545-4007-abfc-9d9100ea22d0",
+    "name": "芹菜",
+    "before": [],
+    "after": [
+      "all_year"
+    ]
+  },
+  {
+    "id": "d0fb9e93-a7ce-444b-a565-2fd1644b0204",
+    "name": "葱",
+    "before": [],
+    "after": [
+      "all_year"
+    ]
+  },
+  {
+    "id": "006a19ff-75ec-446e-99fd-018147995b5b",
+    "name": "小白菜",
+    "before": [
+      "winter"
+    ],
+    "after": [
+      "spring",
+      "autumn",
+      "winter"
+    ]
+  },
+  {
+    "id": "fc03a52f-8146-42a0-a251-b335e2c69d7d",
+    "name": "芋头",
+    "before": [
+      "autumn",
+      "summer"
+    ],
+    "after": [
+      "summer",
+      "autumn",
+      "winter"
+    ]
+  },
+  {
+    "id": "8ba5c448-8307-4d78-a7d8-8711c2fa0c0a",
+    "name": "笋干",
+    "before": [
+      "winter",
+      "autumn"
+    ],
+    "after": [
+      "all_year"
+    ]
+  },
+  {
+    "id": "49ce170c-9f0b-4673-a836-012d4e6cc1d1",
+    "name": "莴苣",
+    "before": [
+      "summer"
+    ],
+    "after": [
+      "spring",
+      "autumn",
+      "winter"
+    ]
+  },
+  {
+    "id": "551389af-951c-4f32-9f37-8ae6dc2e7150",
+    "name": "春笋",
+    "before": [
+      "spring",
+      "winter"
+    ],
+    "after": [
+      "spring"
+    ]
+  },
+  {
+    "id": "41a7686a-7afc-4fd3-b95d-280df2d864ec",
+    "name": "马子叶",
+    "before": [
+      "all_year"
+    ],
+    "after": [
+      "spring",
+      "autumn",
+      "winter"
+    ]
+  },
+  {
+    "id": "da9a83f8-fecb-43fd-a785-65203f8e2a39",
+    "name": "豆角",
+    "before": [
+      "summer"
+    ],
+    "after": [
+      "summer",
+      "autumn"
+    ]
+  },
+  {
+    "id": "38c956d7-4e65-481b-89d5-2a183204c4c0",
+    "name": "毛豆",
+    "before": [
+      "summer"
+    ],
+    "after": [
+      "summer",
+      "autumn"
+    ]
+  },
+  {
+    "id": "8ce7e2ec-45ca-4a26-bb12-34bb302f9b1c",
+    "name": "秋葵",
+    "before": [
+      "summer"
+    ],
+    "after": [
+      "summer",
+      "autumn"
+    ]
+  },
+  {
+    "id": "942420ad-2d14-44fd-95fd-51d3f2a8b601",
+    "name": "茼蒿菜",
+    "before": [
+      "summer"
+    ],
+    "after": [
+      "spring",
+      "summer"
+    ]
+  },
+  {
+    "id": "6aab7f62-1cab-40ae-8069-2d2aa257716f",
+    "name": "番薯叶",
+    "before": [
+      "summer"
+    ],
+    "after": [
+      "summer",
+      "autumn"
+    ]
+  },
+  {
+    "id": "c2fd9993-a055-4929-83fd-dcf24c2c493b",
+    "name": "红军菜",
+    "before": [
+      "all_year"
+    ],
+    "after": [
+      "spring",
+      "autumn",
+      "winter"
+    ]
+  },
+  {
+    "id": "19c77217-df93-45ca-8256-7b3962987a2c",
+    "name": "扁萝卜",
+    "before": [
+      "all_year"
+    ],
+    "after": [
+      "spring",
+      "winter"
+    ]
+  },
+  {
+    "id": "d64bf3e3-bfa6-4c1c-a3ca-dfe42bbccc58",
+    "name": "捞菜",
+    "before": [
+      "all_year"
+    ],
+    "after": [
+      "spring",
+      "winter"
+    ]
+  },
+  {
+    "id": "75fcce9e-14a1-4cb7-847d-a28d70a60f92",
+    "name": "额菜",
+    "before": [
+      "all_year"
+    ],
+    "after": [
+      "spring",
+      "winter"
+    ]
+  }
+]

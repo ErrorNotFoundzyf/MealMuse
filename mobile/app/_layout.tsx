@@ -6,5 +6,6 @@ import { colors } from '../src/ui';
 import { FamilyGate } from '../src/family-login';
 
 export default function RootLayout() {
-  return <ApiProvider><StatusBar style="dark" /><FamilyGate><MenuProvider><Stack screenOptions={{ contentStyle: { backgroundColor: colors.bg }, headerTintColor: colors.ink, headerStyle: { backgroundColor: colors.bg }, headerShadowVisible: false }}><Stack.Screen name="(tabs)" options={{ headerShown: false }} /><Stack.Screen name="ingredient" options={{ title: '维护食材' }} /><Stack.Screen name="recipe" options={{ title: '菜谱' }} /><Stack.Screen name="menu" options={{ title: '本餐菜单' }} /></Stack></MenuProvider></FamilyGate></ApiProvider>;
+  const Provider = process.env.EXPO_PUBLIC_LOCAL_MODE === '1' ? require('../src/local/local-provider').LocalApiProvider : ApiProvider;
+  return <Provider><StatusBar style="dark" /><FamilyGate><MenuProvider><Stack screenOptions={{ contentStyle: { backgroundColor: colors.bg }, headerTintColor: colors.ink, headerStyle: { backgroundColor: colors.bg }, headerShadowVisible: false }}><Stack.Screen name="(tabs)" options={{ headerShown: false }} /><Stack.Screen name="ingredient" options={{ title: '维护食材' }} /><Stack.Screen name="recipe" options={{ title: '菜谱' }} /><Stack.Screen name="menu" options={{ title: '本餐菜单' }} /></Stack></MenuProvider></FamilyGate></Provider>;
 }

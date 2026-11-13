@@ -46,10 +46,10 @@ export default function Settings() {
         <Button label="保存家庭默认" busy={busy === 'profile'} disabled={!!busy || total < 1 || total > 20} onPress={saveProfile} />
       </>}
     </View>
-    <View style={s.card}><Text style={s.section}>家庭服务连接</Text><Text style={s.caption}>真机需要填写手机可访问的后端地址。10.0.2.2 仅适用于 Android 模拟器。</Text><Field label="服务地址" value={url} onChange={setUrl} placeholder="https://your-family-api.example" />
+    {process.env.EXPO_PUBLIC_LOCAL_MODE === '1' ? (()=>{const LocalSections=require('../../src/local/local-settings').LocalSettings;return <LocalSections />;})() : <View style={s.card}><Text style={s.section}>家庭服务连接</Text><Text style={s.caption}>真机需要填写手机可访问的后端地址。10.0.2.2 仅适用于 Android 模拟器。</Text><Field label="服务地址" value={url} onChange={setUrl} placeholder="https://your-family-api.example" />
       {api.authState === 'signedIn' ? <Text style={s.caption}>已使用家庭账号登录。</Text> : api.hasToken && !replaceToken ? <><Text style={s.caption}>已保存家庭接入凭证，不在此显示。</Text><Button label="更换或清除凭证" secondary onPress={() => setReplaceToken(true)} /></> : <Field label="家庭接入凭证（本地开发可留空）" value={token} onChange={v => { setToken(v); setReplaceToken(true); }} secret />}
       <Button label="保存连接设置" secondary busy={busy === 'connection'} disabled={!!busy} onPress={() => dirty ? Alert.alert('更换连接', '未保存的家庭配置将被重新加载。', [{ text: '取消' }, { text: '继续', onPress: saveConnection }]) : saveConnection()} />
-    </View>
-    <Text style={s.caption}>吃饭灵感 · 0.4.0 / 对话搭配{ '\n' }无图片，无市场状态维护。食材季节可按家庭经验调整。</Text>
+    </View>}
+    <Text style={s.caption}>吃饭灵感 · 0.2.0 / 离线规则搭配{ '\n' }无图片，无市场状态维护。食材季节可按家庭经验调整。</Text>
   </Page>;
 }
